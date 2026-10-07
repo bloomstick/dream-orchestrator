@@ -17,7 +17,7 @@ the Architect, and everything stops when the task ships.
 
 ## Layout
 
-- `skills/architect/` — the Architect skill itself (HOME — this is the source
+- `.agents/skills/architect/` — the Architect skill itself (HOME — this is the source
   of truth; see below). Execution mechanics live only in the runbook —
   the skill points at them, never restates them.
 - `dispatcher/` — on-demand dispatch scripts (run by the Architect inside a
