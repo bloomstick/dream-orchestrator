@@ -5,7 +5,7 @@
 .DESCRIPTION
     Attended-only: run by the Architect inside a live session. NEVER scheduled.
     FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
-    Flow: oldest ready issue -> worktree+branch in TARGET repo ->
+    Flow: oldest ready issue in TARGET repo -> worktree+branch there ->
       opencode run (foreground streaming; background only with notify-on-completion) ->
       comment report on issue, set next label, verify child processes dead.
     No behavior changes in this help update; comments only.
@@ -15,8 +15,9 @@
     Implementation: if ($TargetRepo -eq "" -and -not $DryRun) { throw "pass -TargetRepo <path-to-target-repo>" }.
 
 .PARAMETER IssueNumber
-    Issue number to claim. Default 0 = auto-claim oldest ready via
+    Issue number to claim in the TARGET repo. Default 0 = auto-claim oldest ready via
     `gh issue list --label "ready" --state open --json number,createdAt --jq "sort_by(.createdAt)[0].number"`.
+    All `gh issue` operations run against the TARGET repo (the working repo) — never the orchestrator checkout.
     In -DryRun, 0 is coerced to 999 ($Number = 999). Otherwise parsed from gh output via [int]$Raw.Trim().Trim('"').
 
 .PARAMETER WorkerPrompt
@@ -42,7 +43,7 @@
 
 .EXAMPLE
     .\Invoke-Dispatch.ps1 -TargetRepo C:\my\projects\dream-monorepo [-IssueNumber 0] [-DryRun]
-    Auto-claim oldest ready issue in orchestrator repo, create worktree+branch in target repo, stream worker.
+    Auto-claim oldest ready issue in target repo, create worktree+branch there, stream worker.
 
 .EXAMPLE
     .\Invoke-Dispatch.ps1 -DryRun
@@ -76,7 +77,7 @@
 # Invoke-Dispatch.ps1 - on-demand dispatcher skeleton.
 # Attended-only: run by the Architect inside a live session. NEVER scheduled.
 # FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
-# Flow: oldest ready issue -> worktree+branch in TARGET repo -> opencode run
+# Flow: oldest ready issue in TARGET repo -> worktree+branch there -> opencode run
 #   (foreground streaming; background only with notify-on-completion) ->
 #   comment report on issue, set next label, verify child processes dead.
 # Usage:
@@ -125,7 +126,10 @@ if ($DryRun) {
   exit 0
 }
 
-Push-Location $OrchestratorDir
+# Issues live in the TARGET repo (the working repo). gh resolves its repo from the
+# current directory, so the live section runs with the TARGET repo as CWD —
+# never the orchestrator checkout (scripts only, no work items there).
+Push-Location $TargetRepo
 try {
   if ($Number -eq 0) {
     Write-Output "CLAIM: listing oldest ready issue"

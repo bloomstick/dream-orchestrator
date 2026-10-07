@@ -16,6 +16,11 @@ between repos — copies drift, references don't.
   nothing to go stale.
 - Worker prompts reference the orchestrator path for the single phase they
   need (usually dispatch only); workers never write to it.
+- Milestone issues and status labels (`ready`, `in-progress`, `in-review`,
+  `needs-fix`, `blocked-human`) live in the working repo — never in the
+  orchestrator repo. The dispatcher claims, comments, and labels there
+  (`Push-Location $TargetRepo`); sync labels per working repo with
+  `templates/Sync-Labels.ps1 --repo <owner/name>`.
 
 ## Why not vendoring or submodules
 

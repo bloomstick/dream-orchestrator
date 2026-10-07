@@ -145,7 +145,7 @@ follow `templates/milestone-issue.md` (labels per `templates/labels.md`).
 
 ## 7. Execution (mechanics live in the orchestrator runbook)
 
-How prompts get run — file it (issue, task code first), spawn it
+How prompts get run — file it in the working repo (issue, task code first), spawn it
 (\opencode run\, fresh worktree + branch), watch it (issue comments +
 streamed output, heartbeat windows, silence is failure), collect it
 (five-section report), land it (PR → Tier verification → queue → close →

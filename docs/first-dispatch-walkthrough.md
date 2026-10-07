@@ -8,10 +8,12 @@ happens inside one live session started by a human asking the Architect.
 ## 0. Preconditions (do not fire until all green)
 
 - [ ] Live session: human asked the Architect directly. No other entry exists.
-- [ ] You are on the orchestrator checkout; worker work lands in the TARGET repo
-      worktree/branch, never in this checkout, never in any other repo.
+- [ ] You are on the orchestrator checkout for scripts only; worker work lands in
+      the TARGET repo worktree/branch, never in this checkout, never in any
+      other repo. Milestone issues live in the TARGET repo too (the working
+      repo) — never in the orchestrator repo.
 - [ ] `gh` authenticated, `opencode` on PATH, `git` on PATH.
-- [ ] A `ready`-labelled issue exists in this repo (`dream-orchestrator`).
+- [ ] A `ready`-labelled issue exists in the TARGET repo (the working repo).
 - [ ] Target repo path known (passed as `-TargetRepo <path-to-target-repo>`).
 - [ ] Foreground console visible for streaming. If you plan `-Background`,
       a `-NotifyCommand` is mandatory — background without notify is forbidden.
@@ -26,13 +28,16 @@ Abort if any box is unchecked. Fix the precondition, do not work around it.
 All commands run by the Architect inside the live session, foreground unless
 stated. Never schedule, never daemonize.
 
-1. **Claim** — oldest `ready` issue → `in-progress`:
+1. **Claim** — oldest `ready` issue → `in-progress` (run `gh` from the TARGET
+   repo checkout so it resolves there, or pass `--repo`; dispatcher does the
+   former via `Push-Location $TargetRepo`):
    `gh issue list --label "ready" --state open` (dispatcher picks oldest),
    then `gh issue edit <n> --remove-label "ready" --add-label "in-progress"`.
 2. **Run** — worktree + branch in TARGET repo:
    `git -C <TargetRepo> worktree add <temp>/work-p-<n> -b feat/p-<n>-worker`,
    then `opencode run <worker-prompt + issue body>` with console streaming.
-3. **Comment + label** — worker report → issue, `in-progress` → `in-review`:
+3. **Comment + label** — worker report → TARGET-repo issue, `in-progress` →
+   `in-review`:
    `gh issue comment <n> --body-file <ReportFile>`,
    then `gh issue edit <n> --remove-label "in-progress" --add-label "in-review"`.
 4. **Judge** (runbook step 1) — Architect reads worker report (task code first
@@ -95,5 +100,6 @@ in foreground.
   do not close, do not merge. Kill or wait for the listed jobs/child procs,
   re-run the silence commands until empty. Closing over live children violates
   rule 2.
-- **Any confusion about which repo you are in**: abort immediately. This repo
-  only; never touch any other repository.
+- **Any confusion about which repo you are in**: abort immediately. Worker work
+  and milestone issues live in the TARGET repo only; never touch any other
+  repository. The orchestrator checkout provides scripts only.
