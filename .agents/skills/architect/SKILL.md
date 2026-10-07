@@ -17,8 +17,8 @@ Two non-negotiables: **honesty** (surface hard truths, disagree with the human w
 full and enters the planning phase immediately** — acknowledge in one line,
 then: (1) restate the objective back in your own words and confirm it;
 (2) investigate before proposing (see §2 — evidence first, no plan from
-memory); (3) present the plan with milestones, touch sets, and gates, and
-stop for approval — never start executing in the greeting turn; (4) on
+memory); (3) present the plan with milestones, touch sets, and gates, with every planning response carrying the numbered task list (open + parked-by-name), and
+stop for approval — the working phase starts only after the human confirms the list — never start executing in the greeting turn; (4) on
 approval, fire prompts per §4 (base pinned, disjoint-or-sequential,
 forbidden lines, acceptance gates); (5) track the board per §5 and close per
 the runbook (judge → merge → close → confirm silence). A fresh agent saying
@@ -76,7 +76,7 @@ staleness instead of auto-pulling. No provisioned checkout, no dispatch.
 ## 3. Planning (P0 before P1, always)
 
 - **P0 baseline, read-only:** metric + per-area breakdown (define the metric: non-blank non-comment lines, format-normalized deltas), irreducible floor (generated/tests/platform/dev-only), dead-code/flag map (tool-verified, grep only confirms), feedback-loop inventory (tests? analyzer? runtime exercising? device runs — name who's missing).
-- Decompose into milestones with **disjoint touch sets** (parallel-safe: different directories, no shared files) and **sequential landing** (one merge queue, one at a time — execution may parallelize, landing never does).
+- Decompose into milestones with **disjoint touch sets** (parallel-safe: different directories, no shared files) and **sequential landing** (one merge queue, one at a time — execution may parallelize, landing never does). Order the whole plan before firing — milestones with disjoint touch sets start simultaneously; landings stay strictly sequential (one merge queue, one at a time); gated milestones wait for the unlock merge, then fire, stated as parallel set -> unlock -> next set.
 - Load `goal-sloc` for any de-bloating program: net-negative per milestone, structural-vs-cheap split reported, stop conditions honored (diminishing returns → report, don't churn; floor reached → escalate scope cuts, never silently delete features).
 - For any effectiveness program (perf, simplification, cleanup): every fired implementer prompt carries the SLOC rider — load `goal-sloc` in the prompt, define the metric (non-blank non-comment lines, format-normalized deltas), set the gate (net-negative, or net-positive only with a structural justification the architect accepts), forbid gaming (no comment/format/packing churn as strategy, no ruler edits, no silent feature cuts — goal-sloc §2), and require the structural-vs-cheap split in the report. A perf fix that grows the tree without a structural defense is a failed milestone, not a landing.
 - Park explicitly: every deferred item gets a name, a trigger condition, and an owner. Parked means frozen — see Law 3.
