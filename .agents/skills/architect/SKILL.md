@@ -121,7 +121,10 @@ follow `templates/milestone-issue.md` (labels per `templates/labels.md`).
   jobs/child procs, never close over live children); `opencode run`
   stays foreground in the live session, background only with
   notify-on-completion — see `dispatcher/Invoke-Dispatch.ps1` and the
-  runbook confirm-silence step.
+  runbook confirm-silence step. Single bounded exception:
+  `dispatcher/Wait-IssuesClosed.ps1` (one-shot `-Timeout`/`-Poll`-capped
+  close-waiter, same category as merge-queue waits); unbounded polling
+  stays forbidden.
 
 ## 6. Standing project rules (instantiation for this repo — adapt per project)
 
