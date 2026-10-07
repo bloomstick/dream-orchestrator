@@ -14,6 +14,12 @@ Worker runs foreground in the live session; background only with notify-on-compl
 5. This repo only. Never touch any other repository.
 6. Stop at ship: when done, stop every child process. Nothing survives the task.
 
+## Heartbeat (anti-silence contract)
+Progress every 5 minutes wall time or each subtask boundary, whichever first —
+as an issue comment on the milestone issue (survives sessions) plus session
+output. Missed heartbeat past the task timeout = dispatcher kills the run and
+marks `blocked-human`. Short tasks (<5 min) heartbeat by completion.
+
 ## Report shape (task code first, exact order)
 ```
 P-XXX-n — short title
