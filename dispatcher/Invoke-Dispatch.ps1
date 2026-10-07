@@ -1,14 +1,16 @@
 <#
 .SYNOPSIS
-    On-demand attended dispatcher: claims oldest ready issue, runs worker in target-repo worktree, comments report, moves label to in-review.
+    On-demand attended dispatcher: claims oldest ready issue, runs worker in target-repo worktree, comments report, opens draft PR, moves label to in-review.
 
 .DESCRIPTION
     Attended-only: run by the Architect inside a live session. NEVER scheduled.
     FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
     Flow: oldest ready issue in TARGET repo -> worktree+branch there ->
       opencode run (foreground streaming; background only with notify-on-completion) ->
-      comment report on issue, set next label, verify child processes dead.
-    No behavior changes in this help update; comments only.
+      comment report on issue, verify branch exists on origin, open DRAFT PR
+      (gh pr create --draft, --head <branch> --base main, body per
+      templates/pull-request.md with Closes: #<n>), set next label,
+      verify child processes dead. NEVER merges, NEVER pushes main.
 
 .PARAMETER TargetRepo
     Path to target repo for `git -C <TargetRepo> worktree add`. Required unless -DryRun.
@@ -33,8 +35,9 @@
 
 .PARAMETER DryRun
     Switch. When present: prints DRY CLAIM / DRY RUN worktree+branch (feat/p-<N>-worker) /
-    DRY RUN opencode run / optional DRY NOTIFY / DRY COMMENT / DRY LABEL, calls Confirm-QuietShip,
-    prints DRY DONE, then `exit 0`. No gh/git/opencode mutations.
+    DRY RUN opencode run / optional DRY NOTIFY / DRY COMMENT / DRY PR (branch-on-origin
+    verify + gh pr create --draft, --head <branch> --base main) / DRY LABEL,
+    calls Confirm-QuietShip, prints DRY DONE, then `exit 0`. No gh/git/opencode mutations.
 
 .PARAMETER Background
     Switch. Foreground streaming by default. Background only with notify-on-completion:
@@ -60,7 +63,7 @@
     Exit codes (matches implementation line-for-line; only explicit `exit 0` is in the DryRun path,
     all failures are terminating throw -> non-zero host exit):
       0       - Success: DryRun path reached `exit 0` (DRY DONE); or non-DryRun path completed
-                CLAIM -> RUN -> COMMENT -> label in-review -> Confirm-QuietShip -> DONE without throw.
+                CLAIM -> RUN -> COMMENT -> PR (draft) -> label in-review -> Confirm-QuietShip -> DONE without throw.
       non-0   - Terminating error (throw). Mapping by throw site:
                 * "background only with notify-on-completion: pass -NotifyCommand or run foreground"
                   - (-Background with empty -NotifyCommand).
@@ -74,6 +77,12 @@
                 * "worktree add failed" - (`git -C <TargetRepo> worktree add <WorkDir> -b feat/p-<N>-worker` non-zero).
                 * "worker exited non-zero" - (`opencode run <PromptText>` non-zero).
                 * "comment failed" - (`gh issue comment <N> --body-file <ReportFile>` non-zero).
+                * "pr verify failed: branch missing on origin" - (`git ls-remote --heads origin <Branch>`
+                  non-zero, or empty output meaning the worker branch was never pushed; fail-sharp,
+                  no PR attempted).
+                * "pr create failed" - (`gh pr create --draft --head <Branch> --base main
+                  --title <report-first-line> --body-file <PrBodyFile>` non-zero. Never merges,
+                  never pushes main: no `gh pr merge`, no auto-merge flags anywhere in this file).
                 * "label transition failed" - (`gh issue edit <N> --remove-label in-progress --add-label in-review` non-zero).
                 Plus any propagated host/cmdlet error (e.g. Get-Content on missing -WorkerPrompt,
                 Push-Location/Pop-Location, Get-CimInstance) under $ErrorActionPreference = "Stop".
@@ -83,7 +92,8 @@
 # FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
 # Flow: oldest ready issue in TARGET repo -> worktree+branch there -> opencode run
 #   (foreground streaming; background only with notify-on-completion) ->
-#   comment report on issue, set next label, verify child processes dead.
+#   comment report on issue, verify branch on origin, open DRAFT PR (never merge,
+#   never push main), set next label, verify child processes dead.
 # Usage:
 #   .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> [-IssueNumber 0] [-DryRun]
 param(
@@ -124,9 +134,11 @@ if ($DryRun) {
   Write-Output ("DRY RUN: opencode run foreground streaming with prompt {0}" -f $WorkerPrompt)
   if ($Background) { Write-Output ("DRY NOTIFY: would run notify: {0}" -f $NotifyCommand) }
   Write-Output ("DRY COMMENT: report {0} -> issue #{1} comment (gh issue comment, no mutate)" -f $ReportFile, $Number)
+  Write-Output ("DRY PR: verify branch feat/p-{0}-worker exists on origin (git ls-remote --heads, no mutate)" -f $Number)
+  Write-Output ("DRY PR: gh pr create --draft --head feat/p-{0}-worker --base main --title <report-first-line> --body-file <pr-body-file> (no mutate, never merge)" -f $Number)
   Write-Output ("DRY LABEL: issue #{0} in-progress -> in-review (gh issue edit, no mutate)" -f $Number)
   Confirm-QuietShip
-  Write-Output ("DRY DONE: claim->run->comment->label transitions shown, processes empty")
+  Write-Output ("DRY DONE: claim->run->comment->pr->label transitions shown, processes empty")
   exit 0
 }
 
@@ -172,6 +184,42 @@ try {
   Write-Output ("COMMENT: report {0} -> issue #{1}" -f $ReportFile, $Number)
   & gh issue comment $Number --body-file $ReportFile
   if ($LASTEXITCODE -ne 0) { throw "comment failed" }
+
+  Write-Output ("PR: verifying branch {0} exists on origin" -f $Branch)
+  $LsRemote = & git -C $TargetRepo ls-remote --heads origin $Branch
+  if ($LASTEXITCODE -ne 0) { throw "pr verify failed: branch missing on origin" }
+  if ([string]::IsNullOrWhiteSpace("$LsRemote")) { throw "pr verify failed: branch missing on origin" }
+
+  $ReportText = Get-Content $ReportFile -Raw
+  $TitleLine = (Get-Content $ReportFile | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
+  if ([string]::IsNullOrWhiteSpace("$TitleLine")) { $TitleLine = $Branch }
+  $TitleLine = "$TitleLine".Trim()
+  $PrBodyFile = (Join-Path ([IO.Path]::GetTempPath()) ("pr-body-{0}.md" -f $Number))
+  $PrBodyLines = @(
+    ("Closes: #{0}" -f $Number),
+    "",
+    "## What",
+    ("Draft review object for issue #{0}: worker branch {1} awaiting human review." -f $Number, $Branch),
+    "",
+    "## Checklist",
+    "- [ ] SLOC counted and reported below",
+    "- [ ] Tests/proofs executed (commands + outputs pasted or linked)",
+    "- [ ] Perf impact: none / measured",
+    "- [ ] Caveats listed (or None)",
+    "- [ ] Branch-only push (no main push; main merge is human)",
+    "- [ ] No scheduler/service/watcher/polling code added",
+    "- [ ] No credentials in repo (env/keyring names only)",
+    "",
+    "## Report",
+    '```',
+    ("{0}" -f $ReportText),
+    '```'
+  )
+  $PrBodyLines | Out-File -FilePath $PrBodyFile -Encoding ascii
+  Write-Output ("PR: creating draft PR head={0} base=main title={1}" -f $Branch, $TitleLine)
+  & gh pr create --draft --head $Branch --base main --title "$TitleLine" --body-file $PrBodyFile
+  if ($LASTEXITCODE -ne 0) { throw "pr create failed" }
+
   & gh issue edit $Number --remove-label "in-progress" --add-label "in-review"
   if ($LASTEXITCODE -ne 0) { throw "label transition failed" }
 
