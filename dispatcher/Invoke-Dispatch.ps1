@@ -1,3 +1,78 @@
+<#
+.SYNOPSIS
+    On-demand attended dispatcher: claims oldest ready issue, runs worker in target-repo worktree, comments report, moves label to in-review.
+
+.DESCRIPTION
+    Attended-only: run by the Architect inside a live session. NEVER scheduled.
+    FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
+    Flow: oldest ready issue -> worktree+branch in TARGET repo ->
+      opencode run (foreground streaming; background only with notify-on-completion) ->
+      comment report on issue, set next label, verify child processes dead.
+    No behavior changes in this help update; comments only.
+
+.PARAMETER TargetRepo
+    Path to target repo for `git -C <TargetRepo> worktree add`. Required unless -DryRun.
+    Implementation: if ($TargetRepo -eq "" -and -not $DryRun) { throw "pass -TargetRepo <path-to-target-repo>" }.
+
+.PARAMETER IssueNumber
+    Issue number to claim. Default 0 = auto-claim oldest ready via
+    `gh issue list --label "ready" --state open --json number,createdAt --jq "sort_by(.createdAt)[0].number"`.
+    In -DryRun, 0 is coerced to 999 ($Number = 999). Otherwise parsed from gh output via [int]$Raw.Trim().Trim('"').
+
+.PARAMETER WorkerPrompt
+    Path to worker prompt markdown. Default "" resolves to <orchestrator>/prompts\worker-prompt.md.
+    Consumed via Get-Content -Raw then `opencode run <PromptText>` after Push-Location to worktree dir.
+
+.PARAMETER ReportFile
+    Path to markdown report posted via `gh issue comment <Number> --body-file <ReportFile>`.
+    Default "" resolves to Join-Path ([IO.Path]::GetTempPath()) "dispatch-report.md".
+
+.PARAMETER DryRun
+    Switch. When present: prints DRY CLAIM / DRY RUN worktree+branch (feat/p-<N>-worker) /
+    DRY RUN opencode run / optional DRY NOTIFY / DRY COMMENT / DRY LABEL, calls Confirm-QuietShip,
+    prints DRY DONE, then `exit 0`. No gh/git/opencode mutations.
+
+.PARAMETER Background
+    Switch. Foreground streaming by default. Background only with notify-on-completion:
+    requires -NotifyCommand non-empty, else throw. Implementation only logs
+    "RUN: background mode, notify=<NotifyCommand>"; the notify command itself is not invoked here.
+
+.PARAMETER NotifyCommand
+    Completion-notify command string used with -Background. Default "". Logged in DRY NOTIFY and RUN paths.
+
+.EXAMPLE
+    .\Invoke-Dispatch.ps1 -TargetRepo C:\my\projects\dream-monorepo [-IssueNumber 0] [-DryRun]
+    Auto-claim oldest ready issue in orchestrator repo, create worktree+branch in target repo, stream worker.
+
+.EXAMPLE
+    .\Invoke-Dispatch.ps1 -DryRun
+    No -TargetRepo needed; simulates claim->run->comment->label for issue #999 and exits 0.
+
+.EXAMPLE
+    .\Invoke-Dispatch.ps1 -TargetRepo C:\my\projects\dream-monorepo -IssueNumber 12 -Background -NotifyCommand "msg done"
+    Foreground gating example: allows background flag only because notify string is supplied.
+
+.NOTES
+    Exit codes (matches implementation line-for-line; only explicit `exit 0` is in the DryRun path,
+    all failures are terminating throw -> non-zero host exit):
+      0       - Success: DryRun path reached `exit 0` (DRY DONE); or non-DryRun path completed
+                CLAIM -> RUN -> COMMENT -> label in-review -> Confirm-QuietShip -> DONE without throw.
+      non-0   - Terminating error (throw). Mapping by throw site:
+                * "background only with notify-on-completion: pass -NotifyCommand or run foreground"
+                  - (-Background with empty -NotifyCommand).
+                * "pass -TargetRepo <path-to-target-repo>" - (-TargetRepo empty without -DryRun).
+                * "stop-at-ship violated: child processes alive" - (Confirm-QuietShip found
+                  Get-Job -State Running or child opencode|gh|git(.exe) under $PID).
+                * "no ready issues found" - (`gh issue list --label ready` non-zero exit or empty output
+                  when -IssueNumber 0 and not -DryRun).
+                * "claim failed" - (`gh issue edit <N> --remove-label ready --add-label in-progress` non-zero).
+                * "worktree add failed" - (`git -C <TargetRepo> worktree add <WorkDir> -b feat/p-<N>-worker` non-zero).
+                * "worker exited non-zero" - (`opencode run <PromptText>` non-zero).
+                * "comment failed" - (`gh issue comment <N> --body-file <ReportFile>` non-zero).
+                * "label transition failed" - (`gh issue edit <N> --remove-label in-progress --add-label in-review` non-zero).
+                Plus any propagated host/cmdlet error (e.g. Get-Content on missing -WorkerPrompt,
+                Push-Location/Pop-Location, Get-CimInstance) under $ErrorActionPreference = "Stop".
+#>
 # Invoke-Dispatch.ps1 - on-demand dispatcher skeleton.
 # Attended-only: run by the Architect inside a live session. NEVER scheduled.
 # FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
