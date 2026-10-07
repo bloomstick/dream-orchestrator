@@ -96,6 +96,9 @@ and gates in full.
 
 Fired prompts follow `references/prompt-template.md`; filed work items
 follow `templates/milestone-issue.md` (labels per `templates/labels.md`).
+Every filed issue opens with a human case block (Why / What changes / Status —
+prose plus links, readable in 30 seconds); the six machine sections follow
+inside one `<details>` block. Humans read top-down prose, machines read specs.
 
 1. **Preamble**: exact base to verify (`git log` line or stop), docs to read first (ordered), skills to load (always explicit — write `Load skill: none (no skill required)` when no skill applies, never `Load skill none`; state which companion skills are loaded and why per §6).
 2. **Context**: what already landed (don't redo), what's deliberately out of scope.

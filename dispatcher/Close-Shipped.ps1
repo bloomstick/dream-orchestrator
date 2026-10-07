@@ -9,10 +9,11 @@
     background persistence. Flow: bounded wait via Wait-IssuesClosed.ps1
     (explicit -IssueNumbers, -Timeout/-Poll caps, heartbeat lines) -> per issue:
     read merge SHA (merged feat/p-<N>-worker branch, or UNMERGED note), label
-    in-review -> done, comment "Shipped <sha>. Silence confirmed below.",
-    close if still open -> fetch origin in TargetRepo, prune work-p-<N>
-    worktree -> final quiet check. Implements runbook step 4 (close), which the
-    single-issue dispatcher does NOT perform on its own.
+    in-review -> done, comment "Shipped <sha> -- merged PR #<n> (<title>)" with
+    links (or the unmerged note), close if still open -> fetch origin in
+    TargetRepo, prune work-p-<N> worktree -> final quiet check. Implements
+    runbook step 4 (close), which the single-issue dispatcher does NOT
+    perform on its own.
 
 .PARAMETER TargetRepo
     Path to target repo for fetch + worktree prune. Required unless -DryRun.
@@ -102,8 +103,23 @@ try {
     & gh issue edit $N --remove-label "in-review" --add-label "done" @RepoArgs
     if ($LASTEXITCODE -ne 0) { throw ("close failed: label done for issue #{0}" -f $N) }
 
+    $ShipText = ""
+    if ($Sha -eq "UNMERGED") {
+      $ShipText = ("Closed without merge (state {0}). Silence confirmed below." -f $State)
+    } else {
+      $PrJson = & gh pr list --head $Branch --state merged --json number,title,url @RepoArgs
+      if ($LASTEXITCODE -ne 0) { throw ("close failed: cannot read merged PR for issue #{0}" -f $N) }
+      $PrList = @()
+      if (-not [string]::IsNullOrWhiteSpace("$PrJson")) { $PrList = @(("$PrJson" | ConvertFrom-Json)) }
+      if ($PrList.Count -gt 0) {
+        $Pr = $PrList[0]
+        $ShipText = ("Shipped {0} -- merged [PR #{1}]({2}) ({3}). Silence confirmed below." -f $Sha, $Pr.number, $Pr.url, $Pr.title)
+      } else {
+        $ShipText = ("Shipped {0}. Silence confirmed below." -f $Sha)
+      }
+    }
     $ShipFile = (Join-Path ([IO.Path]::GetTempPath()) ("shipped-{0}.md" -f $N))
-    [IO.File]::WriteAllText($ShipFile, ("Shipped {0}. Silence confirmed below." -f $Sha), (New-Object Text.UTF8Encoding $false))
+    [IO.File]::WriteAllText($ShipFile, $ShipText, (New-Object Text.UTF8Encoding $false))
     & gh issue comment $N --body-file $ShipFile @RepoArgs
     if ($LASTEXITCODE -ne 0) { throw ("close failed: shipped comment for issue #{0}" -f $N) }
 

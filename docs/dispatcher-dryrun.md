@@ -53,7 +53,9 @@ working directory is unchanged.
 |------|-----------------|---------------------------------------------|
 | Claim | `DRY CLAIM: issue #<n> ready -> in-progress (gh issue edit, no mutate in dry-run)` | The live claim step (`CLAIM: issue #<n> ready -> in-progress` + `gh issue edit $Number --remove-label "ready" --add-label "in-progress"`). DryRun emits the label transition text only; no `gh` process is spawned. |
 | Run (worktree) | `DRY RUN: worktree+branch in TARGET repo for issue #<n> (git worktree add -b feat/p-<n>-worker)` | The live worktree step (`$Branch = "feat/p-<n>-worker"`, `$WorkDir` under temp, `git -C $TargetRepo worktree add`). DryRun names the branch convention without creating a worktree or branch. |
+| Split | `DRY SPLIT: human-report block visible + transcript collapsed in details (no mutate)` | The live split step (last ```human-report fence posted visible, transcript inside `<details>`, 60000-char cap). DryRun splits nothing. |
 | Sanitize | `DRY SANITIZE: report -> UTF-8 no BOM, ANSI stripped (no mutate)` | The live sanitize step (`Convert-ReportToUtf8`: BOM-aware decode, ANSI CSI/OSC strip, NUL strip, UTF-8-no-BOM rewrite). DryRun converts nothing. |
+| Fetch | `DRY FETCH: live issue body for issue #<n> appended to prompt (gh issue view, no mutate)` | The live fetch step (issue body is the single source of scope). DryRun fetches nothing. |
 | Run (worker) | `DRY RUN: opencode run foreground streaming with prompt <WorkerPrompt>` | The live worker step (`RUN: opencode run foreground streaming` + `Get-Content $WorkerPrompt` + `opencode run $PromptText`). DryRun prints the resolved prompt path; it never reads the prompt file and never spawns `opencode`. |
 | Notify (conditional) | Conditional: only if `-Background` was passed: `DRY NOTIFY: would run notify: <NotifyCommand>` | The live background log line (`RUN: background mode, notify=...`). Confirms the notify-on-completion wiring without running anything in the background. Omitted entirely for foreground DryRuns. |
 | Comment | `DRY COMMENT: report <per-issue-report> -> issue #<n> comment (gh issue comment, no mutate)` | The live comment step (`COMMENT: report <file> -> issue #<n>` + `gh issue comment $Number --body-file $ReportFile`). DryRun prints the resolved report path; no comment is posted and the report file is not read. |
@@ -100,7 +102,9 @@ Expected quiet DryRun stdout shape (with `-IssueNumber 0`, foreground):
 DRY CLAIM: issue #999 ready -> in-progress (gh issue edit, no mutate in dry-run)
 DRY RUN: worktree+branch in TARGET repo for issue #999 (git worktree add -b feat/p-999-worker)
 DRY RUN: opencode run foreground streaming with prompt <orchestrator>\prompts\worker-prompt.md
+DRY FETCH: live issue body for issue #999 appended to prompt (gh issue view, no mutate)
 DRY SANITIZE: report -> UTF-8 no BOM, ANSI stripped (no mutate)
+DRY SPLIT: human-report block visible + transcript collapsed in details (no mutate)
 DRY COMMENT: report <temp>\dispatch-report-999.md -> issue #999 comment (gh issue comment, no mutate)
 DRY PR: verify branch feat/p-999-worker exists on origin (git ls-remote --heads, no mutate)
 DRY PR: gh pr create --head feat/p-999-worker --base main --title <trailing-task-code-line> --body-file <pr-body-file> (no mutate, never merge)

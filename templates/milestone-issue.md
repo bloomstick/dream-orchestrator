@@ -9,6 +9,21 @@ labels: ["ready", "kind:milestone"]
 
 P-XXX-n — short title (dream-monorepo)
 
+## Why
+<!-- Human case, first: problem in prose, why now, what good looks like.
+     A stranger with no context must get the point in 30 seconds. -->
+- 
+
+## What changes
+<!-- Plain-language numbered list with file links. No mechanics, no bans. -->
+1. 
+
+## Status
+<!-- One line, set at filing. Transitions live in comments + labels, not here. -->
+- Status: ready — awaiting dispatch.
+
+<details><summary>Worker prompt (machine-readable — agents read this, humans usually don't need to)</summary>
+
 ## Base
 <!-- Branch base + starting point. Fresh branch on local main of <working-repo> (verify clean `git status` or stop). Skill(s) to load. -->
 - Repo:
@@ -41,10 +56,20 @@ P-XXX-n — short title (dream-monorepo)
 ## Landing + Report
 <!-- Commit on feature branch, push branch ONLY (main merge/push is human). End with added/SLOC/tests/caveats. -->
 - Land:
-- Report shape:
+- Report shape (machine — full detail, stays in the collapsed transcript):
   ```
   Added:
   SLOC:
   Tests/proofs:
   Caveats:
   ```
+- Human report (human — your stdout MUST end with this fenced block, plain prose,
+  no chatter inside, at most 15 lines; the dispatcher posts it visible, the rest collapsed):
+  ```human-report
+  P-XXX-n — one-line outcome (what changed, past tense)
+  Changed: <files, plain words>
+  Proofs: <one line per proof, command — result>
+  Caveats: <none or list>
+  ```
+
+</details>

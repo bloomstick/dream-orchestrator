@@ -62,3 +62,17 @@ entry; from outside PowerShell, wrap with `-Command "& ..."`.
 
 - Convention: **verify multi-issue sets in DryRun output before firing** -
 if the numbers look joined, the invocation style is wrong, not the script.
+
+## 5. Triple backtick before a closing double-quote swallows the file
+
+In an expandable `"..."` string the backtick is the escape character, so
+a fence pattern like `"(?ms)` + ```human-report...```" parses the final
+backtick pair as literal-backtick plus escaped-quote: the string never
+terminates and the rest of the file becomes string content (paid 2026-10-07:
+the PSParser gate went red with cascading `Missing ')'` errors far downstream
+of the real line, in code that read fine to the eye).
+
+- Convention: **fence patterns live in single-quoted strings** -
+  backticks are literal there, no escaping, parses exactly.
+- The PSParser 0-errors gate is load-bearing for exactly this class: run it
+  after every edit touching strings that contain backticks.

@@ -8,7 +8,8 @@
 Closes: #<issue-number> <!-- required: closes-issue link -->
 
 ## What
-<!-- 1-3 lines. -->
+<!-- Filled by the dispatcher from the worker's human-report block (plain prose).
+     Never boilerplate: name the outcome, the files, and the proofs. -->
 
 ## Checklist
 - [ ] SLOC counted and reported below
@@ -19,10 +20,16 @@ Closes: #<issue-number> <!-- required: closes-issue link -->
 - [ ] No scheduler/service/watcher/polling code added
 - [ ] No credentials in repo (env/keyring names only)
 
-## Report
+## Report (machine detail)
+<!-- Collapsed by the dispatcher: full worker report + transcript inside
+     <details>. Humans read What above; the judge reads this on suspicion. -->
+<details><summary>Full worker report + transcript</summary>
+
 ```
 Added:
 SLOC:
 Tests/proofs:
 Caveats:
 ```
+
+</details>

@@ -45,7 +45,9 @@ stated. Never schedule, never daemonize.
    then `gh issue edit <n> --remove-label "ready" --add-label "in-progress"`.
 2. **Run** — worktree + branch in TARGET repo:
    `git -C <TargetRepo> worktree add <temp>/work-p-<n> -b feat/p-<n>-worker`,
-   then `opencode run <worker-prompt + issue body>` with console streaming.
+   then `opencode run <worker-prompt + live issue body>` with console streaming
+   (the dispatcher fetches the issue body at claim time — single source of scope).
+   The worker ends stdout with a ```human-report fence (plain prose, max 15 lines).
    Disjoint milestones start together: one worker-prompt file per issue, then
    `dispatcher/Invoke-Fanout.ps1 -TargetRepo <path> -IssueNumbers <a,b,...>
    -Prompts @{ <a> = <prompt-a>; <b> = <prompt-b> }` (bounded parallel jobs
@@ -54,7 +56,8 @@ stated. Never schedule, never daemonize.
 3. **Comment + PR + label** — sanitized worker report (UTF-8, ANSI stripped)
    → TARGET-repo issue, PR (ready by default; `-Draft` for draft),
    then `in-progress` → `in-review`:
-   sanitize, then `gh issue comment <n> --body-file <ReportFile>`,
+   sanitize, split (human-report visible + transcript collapsed in `<details>`,
+   60000-char cap), then `gh issue comment <n> --body-file <comment-file>`,
    then verify the worker branch exists on origin
    (`git ls-remote --heads origin <branch>`; fail sharp otherwise),
    then `gh pr create [--draft] --head <branch> --base main
@@ -100,12 +103,12 @@ Request-fix re-dispatch is `dispatcher/Invoke-Dispatch.ps1 -IssueNumber <n>
 | Preconditions | All checkboxes above ticked; silence baseline empty (dispatcher children). |
 | Claim | Console prints `CLAIM: issue #<n> ready -> in-progress`; `gh issue view <n>` shows `in-progress` label, no other change. |
 | Run | Console prints `RUN: worktree+branch feat/p-<n>-worker at <temp>/work-p-<n>` then streams `opencode run` output live to the console. Branch exists only in TARGET repo. |
-| Comment + PR + label | Console prints `COMMENT: report <file> -> issue #<n>`, PR verify + `PR: creating ready PR` lines, and `DONE: issue #<n> in-review, ship quiet`; issue shows the sanitized task-code-first report + `in-review` label (no mojibake: report posted UTF-8). |
-| PR | PR exists with head `feat/p-<n>-worker`, base `main`, title = trailing task-code line of the report, body per `templates/pull-request.md` with `Closes: #<n>`. Ready by default (`-Draft` for draft). No merge, no main push. |
+| Comment + PR + label | Console prints `FETCH:`, `COMMENT:`, PR verify + `PR: creating ready PR` lines, and `DONE: issue #<n> in-review, ship quiet`; the issue shows the human report in prose with the transcript collapsed (readable without expanding), label `in-review`. |
+| PR | PR exists with head `feat/p-<n>-worker`, base `main`, title = trailing task-code line, `What` = worker human report in prose, machine report collapsed in `<details>`, `Closes: #<n>`. Ready by default (`-Draft` for draft). No merge, no main push. |
 | Fan-out | `Invoke-Fanout.ps1` prints `FANOUT: starting dispatch job` per issue, `WAIT` heartbeats while running, `===== issue #<n> job Completed =====` plus each job output on completion, `ALL-DONE` at the end. |
 | Judge | Report has task code first line, added files, SLOC, commands + outputs, caveats; diff touches only the TARGET branch, no main push, no schedule/watcher/pipeline code, no credentials, proofs actually ran. |
 | Merge | Human merged; `main` advanced by exactly the reviewed branch. Architect pushed nothing to main. |
-| Close | `Close-Shipped.ps1` prints `CLOSE-WAIT`, waiter `WAIT` lines, then per issue `CLOSE: issue #<n> state=CLOSED ship=<sha>`, `CLOSE: pruned worktree`, finally `SHIP-CLOSED`. Issue labelled `done`, comment `Shipped <sha>. Silence confirmed below.`, issue closed. |
+| Close | `Close-Shipped.ps1` prints `CLOSE-WAIT`, waiter `WAIT` lines, then per issue `CLOSE: issue #<n> state=CLOSED ship=<sha>`, `CLOSE: pruned worktree`, finally `SHIP-CLOSED`. Issue labelled `done`, comment `Shipped <sha> — merged PR #<n> (<title>)` with links (or the unmerged note), issue closed. |
 | Close-wait | `dispatcher/Wait-IssuesClosed.ps1 -IssueNumbers <n> -Timeout <s> -Poll <s>` prints `ALL-CLOSED` (explicit numbers only; never default-all watch). |
 | Silence | `Get-Job -State Running` empty, no child `opencode|gh|git` processes under the dispatcher (dispatcher children only, per `Confirm-QuietShip`), `git worktree list` shows no worker worktree (pruned if kept for log). `SHIP-CHECK: PROCESS TABLE EMPTY` in dispatcher output. |
 

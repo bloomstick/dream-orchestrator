@@ -6,13 +6,15 @@
     Attended-only: run by the Architect inside a live session. NEVER scheduled.
     FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
     Flow: oldest ready issue in TARGET repo -> worktree+branch there ->
+      live issue body fetched at claim (single source of scope) ->
       opencode run (foreground streaming; background only with notify-on-completion) ->
-      sanitize report to UTF-8, comment report on issue, verify branch exists
+      sanitize report to UTF-8, split human-report block (visible) from transcript
+      (collapsed details), comment both on issue, verify branch exists
       on origin, open PR (ready by default, -Draft for draft;
       --head <branch> --base main, body per templates/pull-request.md
-      with Closes: #<n>, title = trailing task-code line of the report),
-      set next label, verify child processes dead.
-      NEVER merges, NEVER pushes main.
+      with Closes: #<n>, What from the human report, title = trailing
+      task-code line of the report), set next label,
+      verify child processes dead. NEVER merges, NEVER pushes main.
 
 .PARAMETER TargetRepo
     Path to target repo for `git -C <TargetRepo> worktree add`. Required unless -DryRun.
@@ -89,6 +91,7 @@
                   explicit removes ready and needs-fix, both add in-progress).
                 * "worktree add failed" - (`git -C <TargetRepo> worktree add <WorkDir> -b feat/p-<N>-worker` non-zero).
                 * "worker exited non-zero" - (`opencode run <PromptText>` non-zero).
+                * "issue body fetch failed" - (`gh issue view <N> --json body` non-zero).
                 * "comment failed" - (`gh issue comment <N> --body-file <ReportFile>` non-zero).
                 * "pr verify failed: branch missing on origin" - (`git ls-remote --heads origin <Branch>`
                   non-zero, or empty output meaning the worker branch was never pushed; fail-sharp,
@@ -103,10 +106,11 @@
 # Invoke-Dispatch.ps1 - on-demand dispatcher skeleton.
 # Attended-only: run by the Architect inside a live session. NEVER scheduled.
 # FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
-# Flow: oldest ready issue in TARGET repo -> worktree+branch there -> opencode run
-#   (foreground streaming; background only with notify-on-completion) ->
-#   sanitize report (UTF-8, no ANSI) -> comment report on issue, verify branch
-#   on origin, open PR (ready by default, -Draft for draft; never merge,
+# Flow: oldest ready issue in TARGET repo -> worktree+branch there -> fetch live
+#   issue body (single source of scope) -> opencode run (foreground streaming;
+#   background only with notify-on-completion) -> sanitize report (UTF-8,
+#   no ANSI) -> comment human-report visible + transcript collapsed, verify
+#   branch on origin, open PR (ready by default, -Draft for draft; never merge,
 #   never push main), set next label, verify child processes dead.
 # Usage:
 #   .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> [-IssueNumber 0] [-DryRun] [-Draft]
@@ -160,6 +164,17 @@ function Convert-ReportToUtf8 {
   [IO.File]::WriteAllText($Path, $Clean, (New-Object Text.UTF8Encoding $false))
 }
 
+function Get-HumanReport {
+  # Visible part of the issue comment: the worker's final ```human-report
+  # fence (plain prose). Returns "" when absent; the caller then falls back
+  # to the trailing task-code line so old-style reports still post readable.
+  param([string]$Path)
+  $Text = Get-Content $Path -Raw
+  $Ms = @([regex]::Matches("$Text", '(?ms)```human-report\s*\r?\n(.*?)\r?\n```'))
+  if ($Ms.Count -eq 0) { return "" }
+  return ($Ms[$Ms.Count - 1].Groups[1].Value.Trim())
+}
+
 function Get-ReportTitle {
   # The captured file holds streaming chatter ABOVE the final report, so the
   # title is the trailing task-code line (scanned from the end), not the first
@@ -188,7 +203,9 @@ if ($DryRun) {
   Write-Output ("DRY RUN: worktree+branch in TARGET repo for issue #{0} (git worktree add -b feat/p-{0}-worker)" -f $Number)
   Write-Output ("DRY RUN: opencode run foreground streaming with prompt {0}" -f $WorkerPrompt)
   if ($Background) { Write-Output ("DRY NOTIFY: would run notify: {0}" -f $NotifyCommand) }
+  Write-Output ("DRY FETCH: live issue body for issue #{0} appended to prompt (gh issue view, no mutate)" -f $Number)
   Write-Output ("DRY SANITIZE: report -> UTF-8 no BOM, ANSI stripped (no mutate)")
+  Write-Output ("DRY SPLIT: human-report block visible + transcript collapsed in details (no mutate)")
   Write-Output ("DRY COMMENT: report {0} -> issue #{1} comment (gh issue comment, no mutate)" -f $ShowReport, $Number)
   Write-Output ("DRY PR: verify branch feat/p-{0}-worker exists on origin (git ls-remote --heads, no mutate)" -f $Number)
   Write-Output ("DRY PR: gh pr create{0} --head feat/p-{1}-worker --base main --title <trailing-task-code-line> --body-file <pr-body-file> (no mutate, never merge)" -f $DraftFlag, $Number)
@@ -231,6 +248,12 @@ try {
     Write-Output ("RUN: background mode, notify={0}" -f $NotifyCommand)
   }
   $PromptText = Get-Content $WorkerPrompt -Raw
+  Write-Output ("FETCH: live issue body for issue #{0} (single source of scope)" -f $Number)
+  $IssueBody = & gh issue view $Number --json body --jq ".body"
+  if ($LASTEXITCODE -ne 0) { throw "issue body fetch failed" }
+  $IssueBody = ("$IssueBody")
+  if ($IssueBody.StartsWith('"') -and $IssueBody.EndsWith('"') -and $IssueBody.Length -ge 2) { $IssueBody = $IssueBody.Substring(1, $IssueBody.Length - 2) }
+  $PromptText = $PromptText + "`r`n`r`n## Live issue body (single source of scope)`r`n" + $IssueBody
   Push-Location $WorkDir
   try {
     & opencode run $PromptText | Tee-Object -FilePath $ReportFile
@@ -241,7 +264,26 @@ try {
 
   Write-Output ("COMMENT: report {0} -> issue #{1}" -f $ReportFile, $Number)
   Convert-ReportToUtf8 -Path $ReportFile
-  & gh issue comment $Number --body-file $ReportFile
+  $HumanReport = Get-HumanReport -Path $ReportFile
+  if ([string]::IsNullOrWhiteSpace($HumanReport)) {
+    $HumanReport = Get-ReportTitle -Path $ReportFile -Fallback $Branch
+  }
+  $Transcript = Get-Content $ReportFile -Raw
+  if (("$Transcript").Length -gt 60000) {
+    $Transcript = ("$Transcript").Substring(0, 60000) + "`r`n`r`n[... transcript truncated at 60000 chars ...]"
+  }
+  $CommentLines = @(
+    $HumanReport,
+    "",
+    "<details><summary>Full worker transcript (machine detail)</summary>",
+    "",
+    ("{0}" -f $Transcript),
+    "",
+    "</details>"
+  )
+  $CommentFile = (Join-Path ([IO.Path]::GetTempPath()) ("comment-{0}.md" -f $Number))
+  [IO.File]::WriteAllText($CommentFile, ($CommentLines -join "`r`n"), (New-Object Text.UTF8Encoding $false))
+  & gh issue comment $Number --body-file $CommentFile
   if ($LASTEXITCODE -ne 0) { throw "comment failed" }
 
   Write-Output ("PR: verifying branch {0} exists on origin" -f $Branch)
@@ -256,7 +298,9 @@ try {
     ("Closes: #{0}" -f $Number),
     "",
     "## What",
-    ("Review object for issue #{0}: worker branch {1} awaiting human review." -f $Number, $Branch),
+    ("Worker report for issue #{0} (branch `{1}`, awaiting human review):" -f $Number, $Branch),
+    "",
+    ("{0}" -f $HumanReport),
     "",
     "## Checklist",
     "- [ ] SLOC counted and reported below",
@@ -267,10 +311,12 @@ try {
     "- [ ] No scheduler/service/watcher/polling code added",
     "- [ ] No credentials in repo (env/keyring names only)",
     "",
-    "## Report",
-    '```',
+    "## Report (machine detail)",
+    "<details><summary>Full worker report + transcript</summary>",
+    "",
     ("{0}" -f $ReportText),
-    '```'
+    "",
+    "</details>"
   )
   [IO.File]::WriteAllText($PrBodyFile, ($PrBodyLines -join "`r`n"), (New-Object Text.UTF8Encoding $false))
   $PrCreateArgs = @("pr", "create", "--head", $Branch, "--base", "main", "--title", $TitleLine, "--body-file", $PrBodyFile)

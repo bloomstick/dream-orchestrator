@@ -3,7 +3,9 @@
 Entry: human asks the Architect in a live session. No other entry exists.
 
 1. Judge
-   - Read worker report (task code first) + diff + proofs.
+   - Read the human report first (visible issue comment — 30-second verdict),
+     then the machine report + transcript (collapsed) + diff + proofs on
+     suspicion or per tier (SKILL.md §5).
    - Fail if: main push, pipeline/schedule code, unrun tests, credentials, wrong repo.
 2. Request-fix
    - `gh issue edit <n> --remove-label in-review --add-label needs-fix`
