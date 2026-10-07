@@ -14,12 +14,20 @@ happens inside one live session started by a human asking the Architect.
       repo) — never in the orchestrator repo.
 - [ ] `gh` authenticated, `opencode` on PATH, `git` on PATH.
 - [ ] A `ready`-labelled issue exists in the TARGET repo (the working repo).
+- [ ] Labels exist in the TARGET repo before claim: `ready`,
+      `in-progress`, `in-review` (plus `needs-fix`, `blocked-human` for the
+      later transitions) must already be present or the claim/label steps
+      fail. Bootstrap or verify with `templates/Sync-Labels.ps1
+      -Repo <owner/name>` from the orchestrator checkout (idempotent —
+      safe to re-run any time; `-DryRun` prints `WOULD SYNC` lines without
+      mutating — re-run it if any label is missing).
 - [ ] Target repo path known (passed as `-TargetRepo <path-to-target-repo>`).
 - [ ] Foreground console visible for streaming. If you plan `-Background`,
       a `-NotifyCommand` is mandatory — background without notify is forbidden.
-- [ ] Quiet ship baseline: `Get-Job -State Running` empty,
-      `Get-Process -Name opencode` empty, `git worktree list` shows no
-      leftover `work-p-*` worktree.
+- [ ] Quiet ship baseline (dispatcher children only, per `Confirm-QuietShip`
+      in `dispatcher/Invoke-Dispatch.ps1`): `Get-Job -State Running` empty
+      and no child `opencode|gh|git` processes under the dispatcher;
+      `git worktree list` shows no leftover `work-p-*` worktree.
 
 Abort if any box is unchecked. Fix the precondition, do not work around it.
 
@@ -48,10 +56,11 @@ stated. Never schedule, never daemonize.
 6. **Close** (runbook step 4) — `gh issue edit <n> --remove-label in-review
    --add-label done` (or close), `gh issue comment <n> --body "Shipped <sha>.
    Silence confirmed below."`, `gh issue close <n>`.
-7. **Confirm silence** (runbook step 5, also `Confirm-QuietShip` in
-   `dispatcher/Invoke-Dispatch.ps1`) — `Get-Job -State Running` empty,
-   `Get-Process -Name opencode` empty, `git worktree list` clean.
-   Foreground streamed; background notified.
+7. **Confirm silence** (runbook step 5, exactly `Confirm-QuietShip` in
+   `dispatcher/Invoke-Dispatch.ps1`) — `Get-Job -State Running` empty and
+   no child `opencode|gh|git` processes under the dispatcher (scoped to
+   dispatcher children, not a machine-wide process sweep); `git worktree
+   list` clean. Foreground streamed; background notified.
 
 Shortcut: `dispatcher/Invoke-Dispatch.ps1 -TargetRepo <path> [-IssueNumber <n>]`
 performs claim → run → comment/label → quiet-ship check. Add `-DryRun` for a
@@ -63,14 +72,14 @@ in foreground.
 
 | Step | Green |
 | ---- | ----- |
-| Preconditions | All checkboxes above ticked; silence baseline empty. |
+| Preconditions | All checkboxes above ticked; silence baseline empty (dispatcher children). |
 | Claim | Console prints `CLAIM: issue #<n> ready -> in-progress`; `gh issue view <n>` shows `in-progress` label, no other change. |
 | Run | Console prints `RUN: worktree+branch feat/p-<n>-worker at <temp>/work-p-<n>` then streams `opencode run` output live to the console. Branch exists only in TARGET repo. |
 | Comment + label | Console prints `COMMENT: report <file> -> issue #<n>` and `DONE: issue #<n> in-review, ship quiet`; issue shows the task-code-first report + `in-review` label. |
 | Judge | Report has task code first line, added files, SLOC, commands + outputs, caveats; diff touches only the TARGET branch, no main push, no schedule/watcher/pipeline code, no credentials, proofs actually ran. |
 | Merge | Human merged; `main` advanced by exactly the reviewed branch. Architect pushed nothing to main. |
 | Close | Issue labelled `done`, comment `Shipped <sha>. Silence confirmed below.`, issue closed. |
-| Silence | `Get-Job -State Running` empty, `Get-Process -Name opencode` empty, `git worktree list` shows no worker worktree (pruned if kept for log). `SHIP-CHECK: PROCESS TABLE EMPTY` in dispatcher output. |
+| Silence | `Get-Job -State Running` empty, no child `opencode|gh|git` processes under the dispatcher (dispatcher children only, per `Confirm-QuietShip`), `git worktree list` shows no worker worktree (pruned if kept for log). `SHIP-CHECK: PROCESS TABLE EMPTY` in dispatcher output. |
 
 ## 3. Abort paths
 
@@ -97,7 +106,8 @@ in foreground.
   wrong repo): request-fix path from the runbook — relabel to `needs-fix`,
   comment exact failure, re-dispatch with `-IssueNumber <n>` foreground.
 - **Silence check fails** (`stop-at-ship violated: child processes alive`):
-  do not close, do not merge. Kill or wait for the listed jobs/child procs,
+  do not close, do not merge. Kill or wait for the listed jobs/child procs
+  (dispatcher children per `Confirm-QuietShip` — never a machine-wide sweep),
   re-run the silence commands until empty. Closing over live children violates
   rule 2.
 - **Any confusion about which repo you are in**: abort immediately. Worker work

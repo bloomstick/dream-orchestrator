@@ -16,8 +16,10 @@ Entry: human asks the Architect in a live session. No other entry exists.
    - `gh issue comment <n> --body "Shipped <sha>. Silence confirmed below."`
    - `gh issue close <n>`
    - Pull main (`git pull --ff-only`) in every live checkout used this task, then prune worker worktrees (`git worktree remove --force <path>`; `git worktree prune`). Stale bases and dead worktrees never accumulate — the dispatcher performs this on close without being asked.
-5. Confirm silence (stop-at-ship proof per run)
+5. Confirm silence (stop-at-ship proof per run — dispatcher children only,
+   exactly `Confirm-QuietShip` in `dispatcher/Invoke-Dispatch.ps1`)
    - `Get-Job -State Running` must be empty.
-   - `Get-Process -Name opencode` must be empty.
+   - No child `opencode|gh|git` processes under the dispatcher (not a
+     machine-wide process sweep).
    - `git worktree list` shows no worker worktree left (prune if kept for log).
    - Foreground streamed; background notified. Silent indefinite execution is a defect.

@@ -36,3 +36,15 @@ Pull the orchestrator checkout (`git pull --ff-only`) at session start when
 it matters (new dispatcher flags, new templates). Stale orchestrator + fresh
 monorepo is a user error the runbook's preflight should catch: compare
 `git log --oneline -1` of both checkouts before dispatching.
+
+## Landing-rule seam (stated here, changed nowhere)
+
+Landing in the orchestrator is always a human manual merge of the worker's
+feature branch to `main` — the Architect never pushes `main`, and no merge
+queue runs in the orchestrator checkout. The merge-queue wording
+(`acquire -> merge -> finish -> release`) in
+`.agents/skills/architect/references/prompt-template.md` is the
+dream-monorepo instantiation of this seam and is parked for orchestrator use:
+a consumer repo may define its own landing procedure on its side of the seam,
+but nothing in this repo changes the rule — worker pushes the branch,
+human performs the merge, Architect verifies read-only.
