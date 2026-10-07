@@ -23,7 +23,8 @@
     honors this value; there is no fixed-interval sleep anywhere.
 
 .PARAMETER IssueNumbers
-    Optional int list to watch. Default empty = watch ALL open issues. An
+    Int list to watch. Required outside -DryRun (throw when empty).
+    In -DryRun, empty means list all open issues once. An
     explicit number that is already closed (or does not exist) simply never
     appears in the remaining set.
 
@@ -47,7 +48,8 @@
     Exit codes:
       0     - ALL-CLOSED: watch set empty (or -DryRun listed the set).
       1     - TIMEOUT: cap reached with issues still open (fail-sharp).
-      non-0 - Terminating error (throw): bad flags, or the gh open-issue
+      non-0 - Terminating error (throw): bad flags, missing -IssueNumbers
+              outside -DryRun, or the gh open-issue
               query itself failed (judged by $LASTEXITCODE, $null = 0).
 #>
 # Wait-IssuesClosed.ps1 - bounded one-shot issue-close waiter.
@@ -103,6 +105,8 @@ if ($DryRun) {
   }
   exit 0
 }
+
+if ($IssueNumbers.Count -eq 0) { throw "pass -IssueNumbers <n,...> (explicit watch set required outside -DryRun)" }
 
 $Watch = [Diagnostics.Stopwatch]::StartNew()
 while ($true) {
