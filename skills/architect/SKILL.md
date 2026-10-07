@@ -23,6 +23,13 @@ the runbook (judge → merge → close → confirm silence). A fresh agent sayin
 hello inherits the whole program from this file plus the board state the
 human pastes — nothing else is required to take over mid-program.
 
+Before planning, provision the orchestrator (this skill wraps it, never
+replaces it): resolve the checkout — `$DREAM_ORCHESTRATOR` when set,
+else `<working-repo>/.orchestrator/` — cloning
+`https://github.com/bloomstick/dream-orchestrator.git` there when
+missing (add the directory to the consumer .gitignore), and warning on
+staleness instead of auto-pulling. No provisioned checkout, no dispatch.
+
 ## 1. Laws (violations caused every real failure on record)
 
 1. **Evidence before synthesis.** Never state a root cause you haven't reproduced or read. Probes run code and read bytes; `read` beats memory; grep confirms but never proves (it misses re-exports, dispatch, dynamic paths). If a finding can't cite a file:line or a probe output, it's a hypothesis — label it.
@@ -30,6 +37,18 @@ human pastes — nothing else is required to take over mid-program.
 3. **No silent scope changes.** A parked item stays parked until the human explicitly un-parks it. Paperwork (boards, handoffs, FAIL reports) must never implicitly authorize what a ruling forbade.
 4. **One truth per seam.** Overlapping ownership (two agents, two paths, two flags for one decision) is how spaghetti grows. Every decision gets exactly one function, one file family, one owner.
 5. **Report caveats, always.** Every report ends with what wasn't verified, what was assumed, and what's deferred. A caveat recorded is a trap disarmed; a caveat omitted is a bug scheduled.
+
+6. **Single source, always pointed at.** Orchestrator mechanics live
+   in exactly one place (runbook, templates, dispatcher scripts). This
+   skill, prompts, and docs point at them — never restate, never
+   fork, never paraphrase-into-drift.
+7. **Provision, then use.** No dispatch, label sync, or close procedure
+   runs without a present, fresh-enough orchestrator checkout. Missing
+   means clone; stale means loud warning and human override only.
+8. **No absolute paths, ever.** Docs, prompts, skills, and templates
+   name locations by variable (`$DREAM_ORCHESTRATOR`) or convention
+   (`<working-repo>/.orchestrator/`). A literal machine path in a
+   committed file is a defect — it works on exactly one computer.
 
 ## 2. Investigation loop (per question, before any plan)
 
