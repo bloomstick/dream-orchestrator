@@ -28,3 +28,6 @@ SLOC: <added>/<removed or total new>
 Tests/proofs: <commands + outputs>
 Caveats: <none or list>
 ```
+
+The dispatcher takes the PR title from your LAST task-code-first block —
+keep streaming chatter above the final report, final report last.

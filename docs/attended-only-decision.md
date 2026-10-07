@@ -21,3 +21,14 @@ What was deliberately NOT built (and why):
 Consequence: idle cost is zero by construction. There is nothing installed
 that could run unattended. `dispatcher/Invoke-Dispatch.ps1` proves this per
 run with `Confirm-QuietShip` (jobs + opencode procs empty).
+
+Bounded exceptions admitted since (same category as merge-queue waits -
+foreground, capped, heartbeat, nothing survives exit):
+
+- `dispatcher/Invoke-Fanout.ps1`: parallel dispatches as child jobs of the
+  live session. Bounded by `-Timeout`/`-Poll`, `WAIT` heartbeat per poll,
+  timeout stops jobs. Jobs only run `Invoke-Dispatch.ps1` (the single
+  runner, no logic fork); landing stays sequential and human.
+- `dispatcher/Close-Shipped.ps1` (with `Wait-IssuesClosed.ps1` inside):
+  one-shot close-wait with mandatory caps, then the close steps. Armed
+  explicitly per issue set; an unarmed HOLD waits on the human with no polling.

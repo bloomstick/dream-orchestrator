@@ -16,6 +16,7 @@ Dry proof: `.\Sync-Labels.ps1 -DryRun` (parses, lists, never mutates).
 | `in-review` | Worker exited; Architect judging. |
 | `needs-fix` | Architect requested fix; ready to re-claim. |
 | `blocked-human` | Needs human decision; dispatcher skips. |
+| `done` | Shipped; set on close by `Close-Shipped.ps1` (created by `Sync-Labels.ps1`). |
 
 ## Area (zero or more)
 | Label | Meaning |

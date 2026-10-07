@@ -14,6 +14,7 @@ $Labels = @(
   @{ Name = "in-review"; Color = "FBCA04"; Description = "Status: worker exited, architect judging" },
   @{ Name = "needs-fix"; Color = "D93F0B"; Description = "Status: architect requested fix" },
   @{ Name = "blocked-human"; Color = "B60205"; Description = "Status: needs human decision, dispatcher skips" },
+  @{ Name = "done"; Color = "2EA44F"; Description = "Status: shipped and closed" },
   @{ Name = "area:dispatcher"; Color = "1D76DB"; Description = "Area: dispatcher scripts" },
   @{ Name = "area:templates"; Color = "0E8A16"; Description = "Area: issue PR templates and labels" },
   @{ Name = "area:prompts"; Color = "5319E7"; Description = "Area: worker and architect prompts" },

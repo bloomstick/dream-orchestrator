@@ -10,19 +10,27 @@ Entry: human asks the Architect in a live session. No other entry exists.
    - `gh issue comment <n> --body "<what failed, file:line, expected proof>"`
    - Re-dispatch with `dispatcher/Invoke-Dispatch.ps1 -IssueNumber <n>` in foreground.
 3. Merge
-   - Draft-PR handoff: the dispatcher already opened a DRAFT PR after COMMENT
-     (`gh pr create --draft --head <branch> --base main`, title = worker-report
-     first line, body per `templates/pull-request.md` with `Closes: #<n>`
+   - PR handoff: the dispatcher already opened a PR after COMMENT
+     (ready by default; `-Draft` restores the draft handoff:
+     `gh pr create [--draft] --head <branch> --base main`, title = trailing
+     task-code line of the worker report, body per
+     `templates/pull-request.md` with `Closes: #<n>`
      required; branch verified on origin via `git ls-remote --heads` first).
-     Review THAT draft PR. Every dispatch stalls at in-review without it.
+     Review THAT PR. Every dispatch stalls at in-review without it.
    - Human merges branch to main manually. Architect never pushes main — a human saying `push` never authorizes a `main` push (push vocabulary in the Architect skill: `push` = branch-only).
-4. Close (automatic after merge — no separate step)
-   - `gh issue edit <n> --remove-label in-review --add-label done` (or close)
-   - `gh issue comment <n> --body "Shipped <sha>. Silence confirmed below."`
-   - `gh issue close <n>`
-   - Confirm the close propagated via bounded wait (explicit numbers only, never default-all watch):
-     `dispatcher/Wait-IssuesClosed.ps1 -IssueNumbers <n> -Timeout <s> -Poll <s>`
-   - Pull main (`git pull --ff-only`) in every live checkout used this task, then prune worker worktrees (`git worktree remove --force <path>`; `git worktree prune`). Stale bases and dead worktrees never accumulate — the dispatcher performs this on close without being asked.
+4. Close (armed, never assumed — `dispatcher/Close-Shipped.ps1`)
+   - After firing, the Architect arms the closer in the same session:
+     `dispatcher/Close-Shipped.ps1 -TargetRepo <path> -IssueNumbers <n,...>
+     -Timeout <s> -Poll <s>` (explicit numbers only, never default-all watch).
+     It waits bounded (heartbeat per poll) for the human's merges + closes,
+     then per issue: label `in-review` -> `done`, comment
+     "Shipped <sha>. Silence confirmed below.", prune the `work-p-<n>`
+     worktree. No closer armed = HOLD waits on the human with no
+     auto-continue; the single-issue dispatcher performs no close step itself.
+   - Fetch origin in the target repo and report the `origin/main` sha after
+     closing. Stale bases and dead worktrees never accumulate.
+   - Standalone bounded wait (no close steps) stays available:
+     `dispatcher/Wait-IssuesClosed.ps1 -IssueNumbers <n> -Timeout <s> -Poll <s>`.
 5. Confirm silence (stop-at-ship proof per run — dispatcher children only,
    exactly `Confirm-QuietShip` in `dispatcher/Invoke-Dispatch.ps1`)
    - `Get-Job -State Running` must be empty.
