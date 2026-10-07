@@ -17,8 +17,10 @@
 .PARAMETER IssueNumber
     Issue number to claim in the TARGET repo. Default 0 = auto-claim oldest ready via
     `gh issue list --label "ready" --state open --json number,createdAt --jq "sort_by(.createdAt)[0].number"`.
-    All `gh issue` operations run against the TARGET repo (the working repo) — never the orchestrator checkout.
+    All `gh issue` operations run against the TARGET repo (the working repo) - never the orchestrator checkout.
     In -DryRun, 0 is coerced to 999 ($Number = 999). Otherwise parsed from gh output via [int]$Raw.Trim().Trim('"').
+    Explicit non-zero normalizes labels (clears ready and needs-fix, adds in-progress) for
+    request-fix re-dispatch; auto-claim (0) clears ready only and is unchanged.
 
 .PARAMETER WorkerPrompt
     Path to worker prompt markdown. Default "" resolves to <orchestrator>/prompts\worker-prompt.md.
@@ -27,6 +29,7 @@
 .PARAMETER ReportFile
     Path to markdown report posted via `gh issue comment <Number> --body-file <ReportFile>`.
     Default "" resolves to Join-Path ([IO.Path]::GetTempPath()) "dispatch-report.md".
+    Worker stdout streams to console and is captured via Tee-Object to this path, so COMMENT posts the real report.
 
 .PARAMETER DryRun
     Switch. When present: prints DRY CLAIM / DRY RUN worktree+branch (feat/p-<N>-worker) /
@@ -42,7 +45,7 @@
     Completion-notify command string used with -Background. Default "". Logged in DRY NOTIFY and RUN paths.
 
 .EXAMPLE
-    .\Invoke-Dispatch.ps1 -TargetRepo C:\my\projects\dream-monorepo [-IssueNumber 0] [-DryRun]
+    .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> [-IssueNumber 0] [-DryRun]
     Auto-claim oldest ready issue in target repo, create worktree+branch there, stream worker.
 
 .EXAMPLE
@@ -50,7 +53,7 @@
     No -TargetRepo needed; simulates claim->run->comment->label for issue #999 and exits 0.
 
 .EXAMPLE
-    .\Invoke-Dispatch.ps1 -TargetRepo C:\my\projects\dream-monorepo -IssueNumber 12 -Background -NotifyCommand "msg done"
+    .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> -IssueNumber 12 -Background -NotifyCommand "msg done"
     Foreground gating example: allows background flag only because notify string is supplied.
 
 .NOTES
@@ -66,7 +69,8 @@
                   Get-Job -State Running or child opencode|gh|git(.exe) under $PID).
                 * "no ready issues found" - (`gh issue list --label ready` non-zero exit or empty output
                   when -IssueNumber 0 and not -DryRun).
-                * "claim failed" - (`gh issue edit <N> --remove-label ready --add-label in-progress` non-zero).
+                * "claim failed" - (`gh issue edit` claim transition non-zero: auto-claim removes ready,
+                  explicit removes ready and needs-fix, both add in-progress).
                 * "worktree add failed" - (`git -C <TargetRepo> worktree add <WorkDir> -b feat/p-<N>-worker` non-zero).
                 * "worker exited non-zero" - (`opencode run <PromptText>` non-zero).
                 * "comment failed" - (`gh issue comment <N> --body-file <ReportFile>` non-zero).
@@ -81,7 +85,7 @@
 #   (foreground streaming; background only with notify-on-completion) ->
 #   comment report on issue, set next label, verify child processes dead.
 # Usage:
-#   .\Invoke-Dispatch.ps1 -TargetRepo C:\my\projects\dream-monorepo [-IssueNumber 0] [-DryRun]
+#   .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> [-IssueNumber 0] [-DryRun]
 param(
   [string]$TargetRepo = "",
   [int]$IssueNumber = 0,
@@ -137,8 +141,13 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Raw)) { throw "no ready issues found" }
     $Number = [int]$Raw.Trim().Trim('"')
   }
-  Write-Output ("CLAIM: issue #{0} ready -> in-progress" -f $Number)
-  & gh issue edit $Number --remove-label "ready" --add-label "in-progress"
+  if ($IssueNumber -ne 0) {
+    Write-Output ("CLAIM: issue #{0} ready/needs-fix -> in-progress" -f $Number)
+    & gh issue edit $Number --remove-label "ready,needs-fix" --add-label "in-progress"
+  } else {
+    Write-Output ("CLAIM: issue #{0} ready -> in-progress" -f $Number)
+    & gh issue edit $Number --remove-label "ready" --add-label "in-progress"
+  }
   if ($LASTEXITCODE -ne 0) { throw "claim failed" }
 
   $Branch = ("feat/p-{0}-worker" -f $Number)
@@ -154,7 +163,7 @@ try {
   $PromptText = Get-Content $WorkerPrompt -Raw
   Push-Location $WorkDir
   try {
-    & opencode run $PromptText
+    & opencode run $PromptText | Tee-Object -FilePath $ReportFile
     if ($LASTEXITCODE -ne 0) { throw "worker exited non-zero" }
   } finally {
     Pop-Location
