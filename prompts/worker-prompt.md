@@ -36,7 +36,7 @@ Caveats: <none or list>
 a human can read, no chatter inside, at most 15 lines; posted visible on the
 issue while the transcript collapses, and reused as the PR description):
 ```human-report
-P-XXX-n — one-line outcome (what changed, past tense)
+P-XXX-n — one-line outcome naming what changed
 Changed: <files, plain words>
 Proofs: <one line per proof, command — result>
 Caveats: <none or list>

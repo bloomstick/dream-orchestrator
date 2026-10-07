@@ -66,7 +66,7 @@ P-XXX-n — short title (dream-monorepo)
 - Human report (human — your stdout MUST end with this fenced block, plain prose,
   no chatter inside, at most 15 lines; the dispatcher posts it visible, the rest collapsed):
   ```human-report
-  P-XXX-n — one-line outcome (what changed, past tense)
+  P-XXX-n — one-line outcome naming what changed
   Changed: <files, plain words>
   Proofs: <one line per proof, command — result>
   Caveats: <none or list>

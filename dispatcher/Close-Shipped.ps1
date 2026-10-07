@@ -138,7 +138,12 @@ try {
   foreach ($N in $IssueNumbers) {
     $WorkDir = (Join-Path ([IO.Path]::GetTempPath()) ("work-p-{0}" -f $N))
     $Listed = & git -C $TargetRepo worktree list --porcelain
-    if (("$Listed") -match [regex]::Escape("$WorkDir")) {
+    # Porcelain prints forward slashes; Join-Path yields backslashes on
+    # Windows -- normalize both or the match silently misses (paid 2026-10-07:
+    # stale work-p-4/work-p-5 survived a close that reported "already gone").
+    $ListedNorm = (("$Listed") -replace "\\", "/")
+    $WorkNorm = (("$WorkDir") -replace "\\", "/")
+    if ($ListedNorm -match [regex]::Escape($WorkNorm)) {
       & git -C $TargetRepo worktree remove --force $WorkDir
       if ($LASTEXITCODE -ne 0) { throw ("close failed: pruning worktree for issue #{0}" -f $N) }
       Write-Output ("CLOSE: pruned worktree {0}" -f $WorkDir)
