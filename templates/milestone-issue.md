@@ -10,7 +10,7 @@ labels: ["ready", "kind:milestone"]
 P-XXX-n — short title (dream-monorepo)
 
 ## Base
-<!-- Branch base + starting point. Fresh branch on local main of C:/path/to/repo (verify clean `git status` or stop). Skill(s) to load. -->
+<!-- Branch base + starting point. Fresh branch on local main of <working-repo> (verify clean `git status` or stop). Skill(s) to load. -->
 - Repo:
 - Base branch:
 - New branch:
