@@ -11,10 +11,11 @@ Entry: human asks the Architect in a live session. No other entry exists.
    - Re-dispatch with `dispatcher/Invoke-Dispatch.ps1 -IssueNumber <n>` in foreground.
 3. Merge
    - Human merges branch to main manually. Architect never pushes main.
-4. Close
+4. Close (automatic after merge — no separate step)
    - `gh issue edit <n> --remove-label in-review --add-label done` (or close)
    - `gh issue comment <n> --body "Shipped <sha>. Silence confirmed below."`
    - `gh issue close <n>`
+   - Pull main (`git pull --ff-only`) in every live checkout used this task, then prune worker worktrees (`git worktree remove --force <path>`; `git worktree prune`). Stale bases and dead worktrees never accumulate — the dispatcher performs this on close without being asked.
 5. Confirm silence (stop-at-ship proof per run)
    - `Get-Job -State Running` must be empty.
    - `Get-Process -Name opencode` must be empty.
