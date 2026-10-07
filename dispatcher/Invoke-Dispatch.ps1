@@ -1,16 +1,18 @@
 <#
 .SYNOPSIS
-    On-demand attended dispatcher: claims oldest ready issue, runs worker in target-repo worktree, comments report, opens draft PR, moves label to in-review.
+    On-demand attended dispatcher: claims oldest ready issue, runs worker in target-repo worktree, comments report, opens PR, moves label to in-review.
 
 .DESCRIPTION
     Attended-only: run by the Architect inside a live session. NEVER scheduled.
     FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
     Flow: oldest ready issue in TARGET repo -> worktree+branch there ->
       opencode run (foreground streaming; background only with notify-on-completion) ->
-      comment report on issue, verify branch exists on origin, open DRAFT PR
-      (gh pr create --draft, --head <branch> --base main, body per
-      templates/pull-request.md with Closes: #<n>), set next label,
-      verify child processes dead. NEVER merges, NEVER pushes main.
+      sanitize report to UTF-8, comment report on issue, verify branch exists
+      on origin, open PR (ready by default, -Draft for draft;
+      --head <branch> --base main, body per templates/pull-request.md
+      with Closes: #<n>, title = trailing task-code line of the report),
+      set next label, verify child processes dead.
+      NEVER merges, NEVER pushes main.
 
 .PARAMETER TargetRepo
     Path to target repo for `git -C <TargetRepo> worktree add`. Required unless -DryRun.
@@ -30,13 +32,24 @@
 
 .PARAMETER ReportFile
     Path to markdown report posted via `gh issue comment <Number> --body-file <ReportFile>`.
-    Default "" resolves to Join-Path ([IO.Path]::GetTempPath()) "dispatch-report.md".
-    Worker stdout streams to console and is captured via Tee-Object to this path, so COMMENT posts the real report.
+    Default "" resolves per-issue to Join-Path ([IO.Path]::GetTempPath()) "dispatch-report-<N>.md"
+    once the issue number is known (after claim; #999 in -DryRun), so concurrent
+    dispatches of different issues never clobber each other's report.
+    Worker stdout streams to console and is captured via Tee-Object to this path,
+    then sanitized to UTF-8 without BOM with ANSI escapes stripped (Tee-Object
+    writes UTF-16LE on Windows PowerShell 5.1, which GitHub renders as mojibake
+    when posted raw), so COMMENT posts the real report.
+
+.PARAMETER Draft
+    Switch. When present, `gh pr create` gets --draft (draft PR handoff).
+    Default (absent) creates a ready-for-review PR: merges stay the human's
+    manual step either way, and the runbook judge verdict precedes any merge,
+    so the draft gate is opt-in friction, not safety.
 
 .PARAMETER DryRun
     Switch. When present: prints DRY CLAIM / DRY RUN worktree+branch (feat/p-<N>-worker) /
     DRY RUN opencode run / optional DRY NOTIFY / DRY COMMENT / DRY PR (branch-on-origin
-    verify + gh pr create --draft, --head <branch> --base main) / DRY LABEL,
+    verify + gh pr create [--draft] --head <branch> --base main) / DRY LABEL,
     calls Confirm-QuietShip, prints DRY DONE, then `exit 0`. No gh/git/opencode mutations.
 
 .PARAMETER Background
@@ -63,7 +76,7 @@
     Exit codes (matches implementation line-for-line; only explicit `exit 0` is in the DryRun path,
     all failures are terminating throw -> non-zero host exit):
       0       - Success: DryRun path reached `exit 0` (DRY DONE); or non-DryRun path completed
-                CLAIM -> RUN -> COMMENT -> PR (draft) -> label in-review -> Confirm-QuietShip -> DONE without throw.
+                CLAIM -> RUN -> COMMENT -> PR (ready, or draft with -Draft) -> label in-review -> Confirm-QuietShip -> DONE without throw.
       non-0   - Terminating error (throw). Mapping by throw site:
                 * "background only with notify-on-completion: pass -NotifyCommand or run foreground"
                   - (-Background with empty -NotifyCommand).
@@ -80,8 +93,8 @@
                 * "pr verify failed: branch missing on origin" - (`git ls-remote --heads origin <Branch>`
                   non-zero, or empty output meaning the worker branch was never pushed; fail-sharp,
                   no PR attempted).
-                * "pr create failed" - (`gh pr create --draft --head <Branch> --base main
-                  --title <report-first-line> --body-file <PrBodyFile>` non-zero. Never merges,
+                * "pr create failed" - (`gh pr create [--draft] --head <Branch> --base main
+                  --title <trailing-task-code-line> --body-file <PrBodyFile>` non-zero. Never merges,
                   never pushes main: no `gh pr merge`, no auto-merge flags anywhere in this file).
                 * "label transition failed" - (`gh issue edit <N> --remove-label in-progress --add-label in-review` non-zero).
                 Plus any propagated host/cmdlet error (e.g. Get-Content on missing -WorkerPrompt,
@@ -92,15 +105,17 @@
 # FORBIDDEN: no schedules, services, watchers, polling loops, background persistence.
 # Flow: oldest ready issue in TARGET repo -> worktree+branch there -> opencode run
 #   (foreground streaming; background only with notify-on-completion) ->
-#   comment report on issue, verify branch on origin, open DRAFT PR (never merge,
+#   sanitize report (UTF-8, no ANSI) -> comment report on issue, verify branch
+#   on origin, open PR (ready by default, -Draft for draft; never merge,
 #   never push main), set next label, verify child processes dead.
 # Usage:
-#   .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> [-IssueNumber 0] [-DryRun]
+#   .\Invoke-Dispatch.ps1 -TargetRepo <target-repo-path> [-IssueNumber 0] [-DryRun] [-Draft]
 param(
   [string]$TargetRepo = "",
   [int]$IssueNumber = 0,
   [string]$WorkerPrompt = "",
   [string]$ReportFile = "",
+  [switch]$Draft,
   [switch]$DryRun,
   [switch]$Background,
   [string]$NotifyCommand = ""
@@ -123,19 +138,60 @@ function Confirm-QuietShip {
 $ScriptDir = $PSScriptRoot
 $OrchestratorDir = Split-Path $ScriptDir -Parent
 if ($WorkerPrompt -eq "") { $WorkerPrompt = (Join-Path $OrchestratorDir "prompts\worker-prompt.md") }
-if ($ReportFile -eq "") { $ReportFile = (Join-Path ([IO.Path]::GetTempPath()) "dispatch-report.md") }
 
 $Number = $IssueNumber
 if ($DryRun -and $Number -eq 0) { $Number = 999 }
 
+function Get-DefaultReportFile {
+  param([int]$N)
+  return (Join-Path ([IO.Path]::GetTempPath()) ("dispatch-report-{0}.md" -f $N))
+}
+
+function Convert-ReportToUtf8 {
+  # Tee-Object writes UTF-16LE on Windows PowerShell 5.1; gh --body-file posts
+  # bytes raw, so an unsanitized report lands on GitHub as NUL-mojibake.
+  # Decode BOM-aware, strip ANSI CSI/OSC escapes and stray NULs, rewrite
+  # UTF-8 without BOM (explicit .NET encoding: Out-File utf8 varies by PS version).
+  param([string]$Path)
+  $Raw = Get-Content $Path -Raw
+  $Clean = [regex]::Replace("$Raw", "\x1b\[[0-9;?]*[A-Za-z]", "")
+  $Clean = [regex]::Replace($Clean, "\x1b\][^\x07]*\x07", "")
+  $Clean = $Clean -replace "\x00", ""
+  [IO.File]::WriteAllText($Path, $Clean, (New-Object Text.UTF8Encoding $false))
+}
+
+function Get-ReportTitle {
+  # The captured file holds streaming chatter ABOVE the final report, so the
+  # title is the trailing task-code line (scanned from the end), not the first
+  # non-empty line. Task codes look like P-hello-1 or M1a. Falls back to first
+  # non-empty line, then the branch.
+  param([string]$Path, [string]$Fallback)
+  $Found = ""
+  $AllLines = @(Get-Content $Path)
+  for ($i = $AllLines.Count - 1; $i -ge 0; $i--) {
+    $T = ("{0}" -f $AllLines[$i]).Trim()
+    if ($T -match "^P-\S+\s" -or $T -match "^M\d+\S*\s") { $Found = $T; break }
+  }
+  if ([string]::IsNullOrWhiteSpace($Found)) {
+    $Found = (@(Get-Content $Path) | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
+  }
+  if ([string]::IsNullOrWhiteSpace("$Found")) { $Found = $Fallback }
+  return ("$Found").Trim()
+}
+
 if ($DryRun) {
+  $ShowReport = $ReportFile
+  if ($ShowReport -eq "") { $ShowReport = Get-DefaultReportFile -N $Number }
+  $DraftFlag = ""
+  if ($Draft) { $DraftFlag = " --draft" }
   Write-Output ("DRY CLAIM: issue #{0} ready -> in-progress (gh issue edit, no mutate in dry-run)" -f $Number)
   Write-Output ("DRY RUN: worktree+branch in TARGET repo for issue #{0} (git worktree add -b feat/p-{0}-worker)" -f $Number)
   Write-Output ("DRY RUN: opencode run foreground streaming with prompt {0}" -f $WorkerPrompt)
   if ($Background) { Write-Output ("DRY NOTIFY: would run notify: {0}" -f $NotifyCommand) }
-  Write-Output ("DRY COMMENT: report {0} -> issue #{1} comment (gh issue comment, no mutate)" -f $ReportFile, $Number)
+  Write-Output ("DRY SANITIZE: report -> UTF-8 no BOM, ANSI stripped (no mutate)")
+  Write-Output ("DRY COMMENT: report {0} -> issue #{1} comment (gh issue comment, no mutate)" -f $ShowReport, $Number)
   Write-Output ("DRY PR: verify branch feat/p-{0}-worker exists on origin (git ls-remote --heads, no mutate)" -f $Number)
-  Write-Output ("DRY PR: gh pr create --draft --head feat/p-{0}-worker --base main --title <report-first-line> --body-file <pr-body-file> (no mutate, never merge)" -f $Number)
+  Write-Output ("DRY PR: gh pr create{0} --head feat/p-{1}-worker --base main --title <trailing-task-code-line> --body-file <pr-body-file> (no mutate, never merge)" -f $DraftFlag, $Number)
   Write-Output ("DRY LABEL: issue #{0} in-progress -> in-review (gh issue edit, no mutate)" -f $Number)
   Confirm-QuietShip
   Write-Output ("DRY DONE: claim->run->comment->pr->label transitions shown, processes empty")
@@ -143,7 +199,7 @@ if ($DryRun) {
 }
 
 # Issues live in the TARGET repo (the working repo). gh resolves its repo from the
-# current directory, so the live section runs with the TARGET repo as CWD —
+# current directory, so the live section runs with the TARGET repo as CWD --
 # never the orchestrator checkout (scripts only, no work items there).
 Push-Location $TargetRepo
 try {
@@ -161,6 +217,8 @@ try {
     & gh issue edit $Number --remove-label "ready" --add-label "in-progress"
   }
   if ($LASTEXITCODE -ne 0) { throw "claim failed" }
+
+  if ($ReportFile -eq "") { $ReportFile = Get-DefaultReportFile -N $Number }
 
   $Branch = ("feat/p-{0}-worker" -f $Number)
   $WorkDir = (Join-Path ([IO.Path]::GetTempPath()) ("work-p-{0}" -f $Number))
@@ -182,6 +240,7 @@ try {
   }
 
   Write-Output ("COMMENT: report {0} -> issue #{1}" -f $ReportFile, $Number)
+  Convert-ReportToUtf8 -Path $ReportFile
   & gh issue comment $Number --body-file $ReportFile
   if ($LASTEXITCODE -ne 0) { throw "comment failed" }
 
@@ -191,15 +250,13 @@ try {
   if ([string]::IsNullOrWhiteSpace("$LsRemote")) { throw "pr verify failed: branch missing on origin" }
 
   $ReportText = Get-Content $ReportFile -Raw
-  $TitleLine = (Get-Content $ReportFile | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1)
-  if ([string]::IsNullOrWhiteSpace("$TitleLine")) { $TitleLine = $Branch }
-  $TitleLine = "$TitleLine".Trim()
+  $TitleLine = Get-ReportTitle -Path $ReportFile -Fallback $Branch
   $PrBodyFile = (Join-Path ([IO.Path]::GetTempPath()) ("pr-body-{0}.md" -f $Number))
   $PrBodyLines = @(
     ("Closes: #{0}" -f $Number),
     "",
     "## What",
-    ("Draft review object for issue #{0}: worker branch {1} awaiting human review." -f $Number, $Branch),
+    ("Review object for issue #{0}: worker branch {1} awaiting human review." -f $Number, $Branch),
     "",
     "## Checklist",
     "- [ ] SLOC counted and reported below",
@@ -215,9 +272,15 @@ try {
     ("{0}" -f $ReportText),
     '```'
   )
-  $PrBodyLines | Out-File -FilePath $PrBodyFile -Encoding ascii
-  Write-Output ("PR: creating draft PR head={0} base=main title={1}" -f $Branch, $TitleLine)
-  & gh pr create --draft --head $Branch --base main --title "$TitleLine" --body-file $PrBodyFile
+  [IO.File]::WriteAllText($PrBodyFile, ($PrBodyLines -join "`r`n"), (New-Object Text.UTF8Encoding $false))
+  $PrCreateArgs = @("pr", "create", "--head", $Branch, "--base", "main", "--title", $TitleLine, "--body-file", $PrBodyFile)
+  $PrKind = "ready"
+  if ($Draft) {
+    $PrCreateArgs = @("pr", "create", "--draft", "--head", $Branch, "--base", "main", "--title", $TitleLine, "--body-file", $PrBodyFile)
+    $PrKind = "draft"
+  }
+  Write-Output ("PR: creating {0} PR head={1} base=main title={2}" -f $PrKind, $Branch, $TitleLine)
+  & gh @PrCreateArgs
   if ($LASTEXITCODE -ne 0) { throw "pr create failed" }
 
   & gh issue edit $Number --remove-label "in-progress" --add-label "in-review"

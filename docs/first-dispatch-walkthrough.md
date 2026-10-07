@@ -14,6 +14,8 @@ happens inside one live session started by a human asking the Architect.
       repo) — never in the orchestrator repo.
 - [ ] `gh` authenticated, `opencode` on PATH, `git` on PATH.
 - [ ] A `ready`-labelled issue exists in the TARGET repo (the working repo).
+- [ ] One worker-prompt file exists per issue to fire (explicit `-IssueNumber`
+      needs its `-WorkerPrompt`; fan-out needs the full `-Prompts` map).
 - [ ] Labels exist in the TARGET repo before claim: `ready`,
       `in-progress`, `in-review` (plus `needs-fix`, `blocked-human` for the
       later transitions) must already be present or the claim/label steps
@@ -44,37 +46,52 @@ stated. Never schedule, never daemonize.
 2. **Run** — worktree + branch in TARGET repo:
    `git -C <TargetRepo> worktree add <temp>/work-p-<n> -b feat/p-<n>-worker`,
    then `opencode run <worker-prompt + issue body>` with console streaming.
-3. **Comment + PR + label** — worker report → TARGET-repo issue, draft PR,
+   Disjoint milestones start together: one worker-prompt file per issue, then
+   `dispatcher/Invoke-Fanout.ps1 -TargetRepo <path> -IssueNumbers <a,b,...>
+   -Prompts @{ <a> = <prompt-a>; <b> = <prompt-b> }` (bounded parallel jobs
+   with heartbeat; per-issue worktrees/branches/reports, shared nothing).
+   Overlapping touch sets stay sequential: one dispatch, land, then the next.
+3. **Comment + PR + label** — sanitized worker report (UTF-8, ANSI stripped)
+   → TARGET-repo issue, PR (ready by default; `-Draft` for draft),
    then `in-progress` → `in-review`:
-   `gh issue comment <n> --body-file <ReportFile>`,
+   sanitize, then `gh issue comment <n> --body-file <ReportFile>`,
    then verify the worker branch exists on origin
    (`git ls-remote --heads origin <branch>`; fail sharp otherwise),
-   then `gh pr create --draft --head <branch> --base main
-   --title "<report-first-line>" --body-file <pr-body-file>`
+   then `gh pr create [--draft] --head <branch> --base main
+   --title "<trailing-task-code-line>" --body-file <pr-body-file>`
    (body per `templates/pull-request.md`: What + Checklist + Report prefilled
    from the worker report, `Closes: #<n>` required; never merge, never push main),
    then `gh issue edit <n> --remove-label "in-progress" --add-label "in-review"`.
 4. **Judge** (runbook step 1) — Architect reads worker report (task code first
    line) + diff + proofs. Fail on: main push, pipeline/schedule code,
    unrun tests, credentials, wrong repo.
-5. **Merge** (runbook step 3) — human merges branch to main manually.
+5. **Merge** (runbook step 3) — human merges branches to main sequentially
+   (landing never parallelizes, even for fanned-out execution).
    Architect never pushes main.
-6. **Close** (runbook step 4) — `gh issue edit <n> --remove-label in-review
-   --add-label done` (or close), `gh issue comment <n> --body "Shipped <sha>.
-   Silence confirmed below."`, `gh issue close <n>`, then confirm the close
-   propagated via bounded wait (explicit numbers only, never default-all watch):
+6. **Close** (runbook step 4 — armed, never assumed) — in the SAME session,
+   right after firing, arm
+   `dispatcher/Close-Shipped.ps1 -TargetRepo <path> -IssueNumbers <n,...>
+   -Timeout <s> -Poll <s>`: it waits bounded for the human's merges + closes,
+   then labels `done`, comments `Shipped <sha>`, fetches origin, prunes the
+   `work-p-<n>` worktrees. No closer armed = HOLD with no auto-continue.
+   Standalone bounded wait (no close steps):
    `dispatcher/Wait-IssuesClosed.ps1 -IssueNumbers <n> -Timeout <s> -Poll <s>`.
 7. **Confirm silence** (runbook step 5, exactly `Confirm-QuietShip` in
    `dispatcher/Invoke-Dispatch.ps1`) — `Get-Job -State Running` empty and
    no child `opencode|gh|git` processes under the dispatcher (scoped to
    dispatcher children, not a machine-wide process sweep); `git worktree
-   list` clean. Foreground streamed; background notified.
+   list` shows no worker worktree left (the closer prunes them; prune if kept
+   for log). Foreground streamed; background notified.
 
-Shortcut: `dispatcher/Invoke-Dispatch.ps1 -TargetRepo <path> [-IssueNumber <n>]`
-performs claim → run → comment/pr/label → quiet-ship check. Add `-DryRun` for a
-no-mutate rehearsal (uses issue #999, prints DRY CLAIM/RUN/COMMENT/PR/LABEL lines).
-Request-fix re-dispatch is `dispatcher/Invoke-Dispatch.ps1 -IssueNumber <n>`
-in foreground.
+Shortcut: `dispatcher/Invoke-Dispatch.ps1 -TargetRepo <path> [-IssueNumber <n>]
+[-WorkerPrompt <file>] [-Draft]` performs claim → run → sanitize →
+comment/pr/label → quiet-ship check (report defaults per-issue, so parallel
+single-dispatches of different issues are report-safe). Add `-DryRun` for a
+no-mutate rehearsal (uses issue #999, prints DRY CLAIM/RUN/SANITIZE/
+COMMENT/PR/LABEL lines).
+Parallel shortcut: `dispatcher/Invoke-Fanout.ps1` (step 2) for the disjoint set.
+Request-fix re-dispatch is `dispatcher/Invoke-Dispatch.ps1 -IssueNumber <n>
+-WorkerPrompt <file>` in foreground.
 
 ## 2. What green looks like per step
 
@@ -83,11 +100,12 @@ in foreground.
 | Preconditions | All checkboxes above ticked; silence baseline empty (dispatcher children). |
 | Claim | Console prints `CLAIM: issue #<n> ready -> in-progress`; `gh issue view <n>` shows `in-progress` label, no other change. |
 | Run | Console prints `RUN: worktree+branch feat/p-<n>-worker at <temp>/work-p-<n>` then streams `opencode run` output live to the console. Branch exists only in TARGET repo. |
-| Comment + PR + label | Console prints `COMMENT: report <file> -> issue #<n>`, PR verify + `PR: creating draft PR` lines, and `DONE: issue #<n> in-review, ship quiet`; issue shows the task-code-first report + `in-review` label. |
-| PR (draft) | Draft PR exists with head `feat/p-<n>-worker`, base `main`, title = report first line, body per `templates/pull-request.md` with `Closes: #<n>`. No merge, no main push. |
+| Comment + PR + label | Console prints `COMMENT: report <file> -> issue #<n>`, PR verify + `PR: creating ready PR` lines, and `DONE: issue #<n> in-review, ship quiet`; issue shows the sanitized task-code-first report + `in-review` label (no mojibake: report posted UTF-8). |
+| PR | PR exists with head `feat/p-<n>-worker`, base `main`, title = trailing task-code line of the report, body per `templates/pull-request.md` with `Closes: #<n>`. Ready by default (`-Draft` for draft). No merge, no main push. |
+| Fan-out | `Invoke-Fanout.ps1` prints `FANOUT: starting dispatch job` per issue, `WAIT` heartbeats while running, `===== issue #<n> job Completed =====` plus each job output on completion, `ALL-DONE` at the end. |
 | Judge | Report has task code first line, added files, SLOC, commands + outputs, caveats; diff touches only the TARGET branch, no main push, no schedule/watcher/pipeline code, no credentials, proofs actually ran. |
 | Merge | Human merged; `main` advanced by exactly the reviewed branch. Architect pushed nothing to main. |
-| Close | Issue labelled `done`, comment `Shipped <sha>. Silence confirmed below.`, issue closed. |
+| Close | `Close-Shipped.ps1` prints `CLOSE-WAIT`, waiter `WAIT` lines, then per issue `CLOSE: issue #<n> state=CLOSED ship=<sha>`, `CLOSE: pruned worktree`, finally `SHIP-CLOSED`. Issue labelled `done`, comment `Shipped <sha>. Silence confirmed below.`, issue closed. |
 | Close-wait | `dispatcher/Wait-IssuesClosed.ps1 -IssueNumbers <n> -Timeout <s> -Poll <s>` prints `ALL-CLOSED` (explicit numbers only; never default-all watch). |
 | Silence | `Get-Job -State Running` empty, no child `opencode|gh|git` processes under the dispatcher (dispatcher children only, per `Confirm-QuietShip`), `git worktree list` shows no worker worktree (pruned if kept for log). `SHIP-CHECK: PROCESS TABLE EMPTY` in dispatcher output. |
 
@@ -115,7 +133,7 @@ in foreground.
 - **PR verify/create fails** (`pr verify failed: branch missing on origin`,
   `pr create failed`): stop. Do not relabel to `in-review` — the issue stays
   `in-progress` with the report already commented. Push the worker branch to
-  origin and retry the `gh pr create --draft` step by hand (body per
+  origin and retry the `gh pr create [--draft]` step by hand (body per
   `templates/pull-request.md`, `Closes: #<n>` required), or request-fix and
   re-dispatch. Never merge from here; never push main.
 - **Judge fails** (main push, pipeline/schedule code, unrun tests, credentials,

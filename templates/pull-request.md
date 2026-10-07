@@ -2,6 +2,9 @@
 
 <!-- Title: same task code as the issue, e.g. P-orch-1 — templates, labels, dispatcher -->
 
+<!-- Title source: trailing task-code line of the sanitized worker report
+     (the dispatcher extracts it; keep the final report block last). -->
+
 Closes: #<issue-number> <!-- required: closes-issue link -->
 
 ## What

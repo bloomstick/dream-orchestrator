@@ -35,7 +35,8 @@ Usage (from the `.EXAMPLE` entries in the script comment header):
   `$OrchestratorDir = Split-Path $ScriptDir -Parent`. Read-only path resolution.
 - The prompt/report default resolution still applies in DryRun:
   empty `WorkerPrompt` → `<orchestrator>/prompts\worker-prompt.md`; empty
-  `ReportFile` → `<temp>\dispatch-report.md`. No files are read or written here,
+  `ReportFile` → per-issue `<temp>\dispatch-report-<n>.md` (so concurrent
+  dispatches never share a report). No files are read or written here,
   only paths are computed.
 - The `$Number` coercion (`$Number = $IssueNumber`; if DryRun
   and `$Number -eq 0`, `$Number = 999`. A DryRun with no `-IssueNumber` therefore
@@ -52,15 +53,16 @@ working directory is unchanged.
 |------|-----------------|---------------------------------------------|
 | Claim | `DRY CLAIM: issue #<n> ready -> in-progress (gh issue edit, no mutate in dry-run)` | The live claim step (`CLAIM: issue #<n> ready -> in-progress` + `gh issue edit $Number --remove-label "ready" --add-label "in-progress"`). DryRun emits the label transition text only; no `gh` process is spawned. |
 | Run (worktree) | `DRY RUN: worktree+branch in TARGET repo for issue #<n> (git worktree add -b feat/p-<n>-worker)` | The live worktree step (`$Branch = "feat/p-<n>-worker"`, `$WorkDir` under temp, `git -C $TargetRepo worktree add`). DryRun names the branch convention without creating a worktree or branch. |
+| Sanitize | `DRY SANITIZE: report -> UTF-8 no BOM, ANSI stripped (no mutate)` | The live sanitize step (`Convert-ReportToUtf8`: BOM-aware decode, ANSI CSI/OSC strip, NUL strip, UTF-8-no-BOM rewrite). DryRun converts nothing. |
 | Run (worker) | `DRY RUN: opencode run foreground streaming with prompt <WorkerPrompt>` | The live worker step (`RUN: opencode run foreground streaming` + `Get-Content $WorkerPrompt` + `opencode run $PromptText`). DryRun prints the resolved prompt path; it never reads the prompt file and never spawns `opencode`. |
 | Notify (conditional) | Conditional: only if `-Background` was passed: `DRY NOTIFY: would run notify: <NotifyCommand>` | The live background log line (`RUN: background mode, notify=...`). Confirms the notify-on-completion wiring without running anything in the background. Omitted entirely for foreground DryRuns. |
-| Comment | `DRY COMMENT: report <ReportFile> -> issue #<n> comment (gh issue comment, no mutate)` | The live comment step (`COMMENT: report <file> -> issue #<n>` + `gh issue comment $Number --body-file $ReportFile`). DryRun prints the resolved report path; no comment is posted and the report file is not read. |
+| Comment | `DRY COMMENT: report <per-issue-report> -> issue #<n> comment (gh issue comment, no mutate)` | The live comment step (`COMMENT: report <file> -> issue #<n>` + `gh issue comment $Number --body-file $ReportFile`). DryRun prints the resolved report path; no comment is posted and the report file is not read. |
 | Label | `DRY LABEL: issue #<n> in-progress -> in-review (gh issue edit, no mutate)` | The live label step (`gh issue edit $Number --remove-label "in-progress" --add-label "in-review"`). DryRun prints the second label transition; no `gh` process is spawned. |
 | Quiet-ship | `Confirm-QuietShip` invocation (real check, not a print) | The same function the live path calls before its `DONE` line. Enumerates running jobs and child worker procs; see below. |
 | Done | `DRY DONE: claim->run->comment->label transitions shown, processes empty` | Mirrors the live `DONE: issue #<n> in-review, ship quiet` line, but asserts only that the four transitions were DISPLAYED, not performed. |
 | Exit | `exit 0` | Terminates before the live path. Guarantees none of the live `gh` / `git` / `opencode` calls, `Push-Location`/`Pop-Location`, or report posting can run. |
 
-Transition summary shown by a DryRun: `claim -> run -> comment -> label`:
+Transition summary shown by a DryRun: `claim -> run -> sanitize -> comment -> pr -> label`:
 
 1. Claim: `ready -> in-progress` (the `DRY CLAIM` line).
 2. Run: worktree+branch `feat/p-<n>-worker` + foreground `opencode run` (the two `DRY RUN` lines, plus the optional `DRY NOTIFY` line).
@@ -98,7 +100,10 @@ Expected quiet DryRun stdout shape (with `-IssueNumber 0`, foreground):
 DRY CLAIM: issue #999 ready -> in-progress (gh issue edit, no mutate in dry-run)
 DRY RUN: worktree+branch in TARGET repo for issue #999 (git worktree add -b feat/p-999-worker)
 DRY RUN: opencode run foreground streaming with prompt <orchestrator>\prompts\worker-prompt.md
-DRY COMMENT: report <temp>\dispatch-report.md -> issue #999 comment (gh issue comment, no mutate)
+DRY SANITIZE: report -> UTF-8 no BOM, ANSI stripped (no mutate)
+DRY COMMENT: report <temp>\dispatch-report-999.md -> issue #999 comment (gh issue comment, no mutate)
+DRY PR: verify branch feat/p-999-worker exists on origin (git ls-remote --heads, no mutate)
+DRY PR: gh pr create --head feat/p-999-worker --base main --title <trailing-task-code-line> --body-file <pr-body-file> (no mutate, never merge)
 DRY LABEL: issue #999 in-progress -> in-review (gh issue edit, no mutate)
 SHIP-CHECK: running jobs=0 child worker procs=0
 SHIP-CHECK: PROCESS TABLE EMPTY (no dispatcher children, no running jobs)
@@ -132,6 +137,14 @@ exit codes to inspect. Its only failure modes are the PowerShell `throw`s above.
   claim/label steps), no `gh issue comment` (the live comment step).
 - No `git -C $TargetRepo worktree add` (the live worktree step) — `TargetRepo` may be empty.
 - No `Get-Content $WorkerPrompt` (the live prompt-read step), no `opencode run $PromptText`
-  (the live worker step).
+  (the live worker step), no `Convert-ReportToUtf8` conversion (the live sanitize step).
 - No `Push-Location` / `Pop-Location` (the live directory-switch steps) — caller CWD unchanged.
 - No report file read or write; `ReportFile` is only interpolated into the `DRY COMMENT` text.
+
+## Fan-out and closer DryRuns
+
+`dispatcher/Invoke-Fanout.ps1 -DryRun` prints one `DRY FANOUT` line per
+issue (prompt path, per-issue report path, ready/draft) plus `DRY DONE`,
+then exits 0: no jobs started, nothing mutated. `dispatcher/Close-Shipped.ps1
+-DryRun` prints one `DRY CLOSE` line per issue plus `DRY DONE`, then exits 0:
+nothing waited, nothing mutated.

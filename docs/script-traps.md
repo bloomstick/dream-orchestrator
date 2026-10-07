@@ -32,3 +32,33 @@ screamingly successful output, before `$LASTEXITCODE` is ever read.
 - `$ErrorActionPreference` mismatches between scripts that call each other
   are a defect class of their own: state the contract (`$LASTEXITCODE`
   judging, no `Stop` near natives) wherever scripts invoke scripts.
+
+## 3. Tee-Object writes UTF-16LE on Win-PS5.1; gh posts bytes raw
+
+`opencode run ... | Tee-Object -FilePath report.md` produces a UTF-16LE file
+(BOM `FF FE`) on Windows PowerShell 5.1. `gh issue comment --body-file`
+posts those bytes verbatim, so GitHub stores a NUL after every character and
+renders the comment as `D^@e^@l^@e^@t^@i^@n^@g^@` mojibake (paid 2026-10-07:
+first comment on the hello_world removal issue arrived unreadable; byte read
+showed the BOM plus hundreds of NULs, on both the file and the posted body).
+
+- Convention: **sanitize every machine-captured report before posting** -
+  BOM-aware decode, strip ANSI CSI/OSC escapes and stray NULs, rewrite UTF-8
+  without BOM (explicit `[Text.UTF8Encoding]::new($false)`; `Out-File -Encoding
+  utf8` still writes a BOM on 5.1). `Convert-ReportToUtf8` in
+  `dispatcher/Invoke-Dispatch.ps1` owns this; no second sanitizer anywhere.
+- Prove with a byte read (`FF FE` absent, `00` absent), never with console
+  rendering: mojibake in a transcript means "check the posted bytes".
+
+## 4. `powershell -File` coerces `4,5` to `45` for `[int[]]` params
+
+With `powershell -File script.ps1 -IssueNumbers 4,5`, every trailing
+argument arrives as a STRING, so `[int[]]` binds `"4,5"` as the single
+number 45 (comma reads as a thousands separator) — the script then waits
+on a nonexistent issue #45 instead of #4 and #5 (seen live 2026-10-07:
+a closer DryRun printed `issue #45`). In-session calls (`& .\script.ps1
+-IssueNumbers 4,5`) bind the array correctly and are the only supported
+entry; from outside PowerShell, wrap with `-Command "& ..."`.
+
+- Convention: **verify multi-issue sets in DryRun output before firing** -
+if the numbers look joined, the invocation style is wrong, not the script.

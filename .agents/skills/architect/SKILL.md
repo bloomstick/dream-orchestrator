@@ -81,7 +81,7 @@ no dispatch.
 ## 3. Planning (P0 before P1, always)
 
 - **P0 baseline, read-only:** metric + per-area breakdown (define the metric: non-blank non-comment lines, format-normalized deltas), irreducible floor (generated/tests/platform/dev-only), dead-code/flag map (tool-verified, grep only confirms), feedback-loop inventory (tests? analyzer? runtime exercising? device runs — name who's missing).
-- Decompose into milestones with **disjoint touch sets** (parallel-safe: different directories, no shared files) and **sequential landing** (one merge queue, one at a time — execution may parallelize, landing never does). Order the whole plan before firing — milestones with disjoint touch sets start simultaneously; landings stay strictly sequential (one merge queue, one at a time); gated milestones wait for the unlock merge, then fire, stated as parallel set -> unlock -> next set.
+- Decompose into milestones with **disjoint touch sets** (parallel-safe: different directories, no shared files) and **sequential landing** (one merge queue, one at a time — execution may parallelize, landing never does). Order the whole plan before firing — milestones with disjoint touch sets start simultaneously (fired together via `dispatcher/Invoke-Fanout.ps1`); landings stay strictly sequential (one merge queue, one at a time); gated milestones wait for the unlock merge, then fire, stated as parallel set -> unlock -> next set.
 - Load `goal-sloc` for any de-bloating program: net-negative per milestone, structural-vs-cheap split reported, stop conditions honored (diminishing returns → report, don't churn; floor reached → escalate scope cuts, never silently delete features).
 - For any effectiveness program (perf, simplification, cleanup): every fired implementer prompt carries the SLOC rider — load `goal-sloc` in the prompt, define the metric (non-blank non-comment lines, format-normalized deltas), set the gate (net-negative, or net-positive only with a structural justification the architect accepts), forbid gaming (no comment/format/packing churn as strategy, no ruler edits, no silent feature cuts — goal-sloc §2), and require the structural-vs-cheap split in the report. A perf fix that grows the tree without a structural defense is a failed milestone, not a landing.
 - Park explicitly: every deferred item gets a name, a trigger condition, and an owner. Parked means frozen — see Law 3.
@@ -126,10 +126,12 @@ follow `templates/milestone-issue.md` (labels per `templates/labels.md`).
   jobs/child procs, never close over live children); `opencode run`
   stays foreground in the live session, background only with
   notify-on-completion — see `dispatcher/Invoke-Dispatch.ps1` and the
-  runbook confirm-silence step. Single bounded exception:
-  `dispatcher/Wait-IssuesClosed.ps1` (one-shot `-Timeout`/`-Poll`-capped
-  close-waiter, same category as merge-queue waits); unbounded polling
-  stays forbidden.
+  runbook confirm-silence step. Bounded mechanisms only (all foreground, capped, heartbeat, nothing survives exit):
+  `dispatcher/Invoke-Fanout.ps1` (parallel dispatches as child jobs),
+  `dispatcher/Wait-IssuesClosed.ps1` (one-shot close-waiter), and
+  `dispatcher/Close-Shipped.ps1` (waiter + close steps, armed per issue set
+  so HOLD auto-continues after the human merges). Unbounded polling
+  stays forbidden; an unarmed HOLD waits on the human with no polling.
 
 ## 6. Standing project rules (dream-monorepo instantiation — adapt per project)
 
@@ -155,7 +157,7 @@ unchanged.
 ## 7. Execution (mechanics live in the orchestrator runbook)
 
 How prompts get run — file it in the working repo (issue, task code first), spawn it
-(\opencode run\, fresh worktree + branch), watch it (issue comments +
+(the dispatcher: `Invoke-Dispatch.ps1` single, `Invoke-Fanout.ps1` for a disjoint set — worktree + branch per issue), watch it (issue comments +
 streamed output, heartbeat windows, silence is failure), collect it
 (five-section report), land it (PR → Tier verification → queue → close →
 confirm silence) — is owned by prompts/architect-runbook.md in the
