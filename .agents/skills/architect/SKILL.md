@@ -43,10 +43,11 @@ confirm silence); first-run narrative:
 
 Before planning, provision the orchestrator (this skill wraps it, never
 replaces it): resolve the checkout — `$DREAM_ORCHESTRATOR` when set,
-else `<working-repo>/.orchestrator/` — cloning
-`https://github.com/bloomstick/dream-orchestrator.git` there when
-missing (add the directory to the consumer .gitignore), and warning on
-staleness instead of auto-pulling. No provisioned checkout, no dispatch.
+else the skill-local checkout placed at install time (a plain directory,
+no `.git`; never clone into `<working-repo>/.orchestrator/` — that path
+is not used) — reinstalling per the install procedure when missing, and
+warning on staleness instead of auto-pulling. No provisioned checkout,
+no dispatch.
 
 ## 1. Laws (violations caused every real failure on record)
 
@@ -62,7 +63,9 @@ staleness instead of auto-pulling. No provisioned checkout, no dispatch.
    fork, never paraphrase-into-drift.
 7. **Provision, then use.** No dispatch, label sync, or close procedure
    runs without a present, fresh-enough orchestrator checkout. Missing
-   means clone; stale means loud warning and human override only.
+   means reinstall per the install procedure (never a
+   `<working-repo>/.orchestrator/` clone — that path is not used);
+   stale means loud warning and human override only.
 8. **No absolute paths, ever.** Docs, prompts, skills, and templates
    name locations by variable (`$DREAM_ORCHESTRATOR`) or convention
    (`<working-repo>/.orchestrator/`). A literal machine path in a
@@ -128,7 +131,13 @@ follow `templates/milestone-issue.md` (labels per `templates/labels.md`).
   close-waiter, same category as merge-queue waits); unbounded polling
   stays forbidden.
 
-## 6. Standing project rules (instantiation for this repo — adapt per project)
+## 6. Standing project rules (dream-monorepo instantiation — adapt per project)
+
+The rules below instantiate this skill for dream-monorepo (Dart/Flutter
+tooling). For any other working repo, adapt with one line: verify with
+PSParser (0 errors) + dispatcher `-DryRun` instead of analyzer + named
+suites; one-worktree-per-agent, branch-only landing, and Caveats transfer
+unchanged.
 
 - One worktree + feature branch per agent; implement → verify (`analyze` + named green suite) → commit; land staged via `dart tools/merge_to_main.dart` streaming to console; pushing `main` is always the human's manual step.
 - One `flutter`/`dart test` per task per worktree; fixed pumps, never concurrent runs; generated files committed, never hand-edited; every user-visible change → `CHANGELOG.md` `[Unreleased]` + docs with behavior changes.
