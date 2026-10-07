@@ -25,6 +25,20 @@ the runbook (judge → merge → close → confirm silence). A fresh agent sayin
 hello inherits the whole program from this file plus the board state the
 human pastes — nothing else is required to take over mid-program.
 
+### Phase order (states only — mechanics live in the runbook)
+
+Planning → execution → watch → hold → stop. Planning settles open
+questions, freezes the plan, and stops for human approval (see §§2–4).
+Execution files issues per `templates/milestone-issue.md` and fires
+children via `opencode run` — the architect never implements.
+Watch tracks the board per §5 and prunes worktrees on close.
+Hold waits on the human (merges PRs / closes issues, or sends a
+correction prompt). A correction re-opens planning; a quiet ship stays
+held. Stop when every issue is closed and silence is confirmed.
+Sequence: `prompts/architect-runbook.md` (judge → merge → close →
+confirm silence); first-run narrative:
+`docs/first-dispatch-walkthrough.md`.
+
 Before planning, provision the orchestrator (this skill wraps it, never
 replaces it): resolve the checkout — `$DREAM_ORCHESTRATOR` when set,
 else `<working-repo>/.orchestrator/` — cloning
@@ -75,6 +89,9 @@ conversation. Never assume the reader saw the investigation, the board,
 or sibling prompts. Every prompt restates its own base, docs, scope,
 and gates in full.
 
+Fired prompts follow `references/prompt-template.md`; filed work items
+follow `templates/milestone-issue.md` (labels per `templates/labels.md`).
+
 1. **Preamble**: exact base to verify (`git log` line or stop), docs to read first (ordered), skills to load (always explicit — write `Load skill: none (no skill required)` when no skill applies, never `Load skill none`; state which companion skills are loaded and why per §6).
 2. **Context**: what already landed (don't redo), what's deliberately out of scope.
 3. **Scope**: allowed files/areas as full repo-relative paths + the change, with file:line anchors where known. A bare `src/...` is never an allowed tree.
@@ -97,6 +114,14 @@ and gates in full.
   level — read diffs only on suspicion. Clean-history agents should almost
   never see Tier 2; that incentive is the point.
 - When a report reveals a new root, write the fix prompt immediately (roots embedded, file:line anchored) — don't let findings cool.
+- Hold by pointing, never by polling: heartbeat, kill, and silence rules
+  live in `prompts/worker-prompt.md` (heartbeat contract, dead-run kill →
+  `blocked-human` per `templates/labels.md`) and
+  `docs/first-dispatch-walkthrough.md` (silence check: kill-or-wait for
+  jobs/child procs, never close over live children); `opencode run`
+  stays foreground in the live session, background only with
+  notify-on-completion — see `dispatcher/Invoke-Dispatch.ps1` and the
+  runbook confirm-silence step.
 
 ## 6. Standing project rules (instantiation for this repo — adapt per project)
 
