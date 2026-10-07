@@ -10,7 +10,7 @@ Entry: human asks the Architect in a live session. No other entry exists.
    - `gh issue comment <n> --body "<what failed, file:line, expected proof>"`
    - Re-dispatch with `dispatcher/Invoke-Dispatch.ps1 -IssueNumber <n>` in foreground.
 3. Merge
-   - Human merges branch to main manually. Architect never pushes main.
+   - Human merges branch to main manually. Architect never pushes main — a human saying `push` never authorizes a `main` push (push vocabulary in the Architect skill: `push` = branch-only).
 4. Close (automatic after merge — no separate step)
    - `gh issue edit <n> --remove-label in-review --add-label done` (or close)
    - `gh issue comment <n> --body "Shipped <sha>. Silence confirmed below."`
