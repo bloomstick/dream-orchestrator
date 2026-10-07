@@ -1,7 +1,7 @@
 # dream-orchestrator
 
 Attended-only agent orchestration for the Dream monorepo. No daemons, no
-schedulers, no background activity — everything starts when the human asks
+schedulers, no background activity — everything starts when the user asks
 the Architect, and everything stops when the task ships.
 
 ## Rules (non-negotiable)
